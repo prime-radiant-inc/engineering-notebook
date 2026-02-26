@@ -1,7 +1,30 @@
 import { escapeHtml, formatTimeAmPm } from "./helpers";
 
 const MESSAGE_REGEX =
-  /^\*\*(User|Claude|Jesse|Assistant|Human)\s*\((?:\d{4}-\d{2}-\d{2}\s+)?(\d{2}:\d{2})\):\*\*\s*(.+)$/;
+  /^\*\*([^()]+?)\s*\((?:\d{4}-\d{2}-\d{2}\s+)?(\d{2}:\d{2})\):\*\*\s*(.+)$/;
+
+export function inferUserDisplayName(projectPath: string | null | undefined): string {
+  if (!projectPath) return "User";
+
+  const unixHomeMatch = projectPath.match(/^\/(?:Users|home)\/([^/]+)/);
+  if (unixHomeMatch?.[1]) return unixHomeMatch[1];
+
+  const windowsHomeMatch = projectPath.match(/^[A-Za-z]:\\Users\\([^\\]+)/);
+  if (windowsHomeMatch?.[1]) return windowsHomeMatch[1];
+
+  return "User";
+}
+
+export function inferAssistantDisplayName(sourcePath: string | null | undefined): string {
+  if (!sourcePath) return "Claude";
+  const normalized = sourcePath.replace(/\\/g, "/").toLowerCase();
+  return normalized.includes("/.codex/") ? "Codex" : "Claude";
+}
+
+function isAssistantSpeaker(speaker: string): boolean {
+  const normalized = speaker.trim().toLowerCase();
+  return normalized === "claude" || normalized === "assistant" || normalized === "codex";
+}
 
 type ParsedMessage = {
   speaker: string;
@@ -11,7 +34,11 @@ type ParsedMessage = {
   role: "user" | "claude";
 };
 
-function parseMessages(markdown: string): ParsedMessage[] {
+function parseMessages(
+  markdown: string,
+  userDisplayName: string,
+  assistantDisplayName: string
+): ParsedMessage[] {
   const lines = markdown.split("\n");
   const messages: ParsedMessage[] = [];
   let current: ParsedMessage | null = null;
@@ -20,12 +47,11 @@ function parseMessages(markdown: string): ParsedMessage[] {
     const match = line.match(MESSAGE_REGEX);
     if (match) {
       if (current) messages.push(current);
-      const speaker = match[1]!;
-      const role: "user" | "claude" =
-        speaker === "Claude" || speaker === "Assistant" ? "claude" : "user";
+      const speaker = match[1]!.trim();
+      const role: "user" | "claude" = isAssistantSpeaker(speaker) ? "claude" : "user";
       const displayName =
-        speaker === "User" || speaker === "Human" ? "Jesse" :
-        speaker === "Assistant" ? "Claude" : speaker;
+        speaker === "User" || speaker === "Human" ? userDisplayName :
+        isAssistantSpeaker(speaker) ? assistantDisplayName : speaker;
       current = {
         speaker,
         displayName,
@@ -63,12 +89,16 @@ function mergeConsecutive(messages: ParsedMessage[]): ParsedMessage[] {
   return merged;
 }
 
-export function renderConversation(markdown: string): string {
+export function renderConversation(
+  markdown: string,
+  userDisplayName = "User",
+  assistantDisplayName = "Claude"
+): string {
   if (!markdown || markdown.trim() === "") {
     return '<div class="empty-state">No conversation data.</div>';
   }
 
-  const messages = parseMessages(markdown);
+  const messages = parseMessages(markdown, userDisplayName, assistantDisplayName);
   if (messages.length === 0) {
     return `<div class="transcript"><pre style="white-space: pre-wrap; font-size: 13px;">${escapeHtml(markdown)}</pre></div>`;
   }

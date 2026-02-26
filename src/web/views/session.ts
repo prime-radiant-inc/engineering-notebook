@@ -1,12 +1,15 @@
 import { Database } from "bun:sqlite";
-import { renderConversation } from "./conversation";
+import { inferAssistantDisplayName, inferUserDisplayName, renderConversation } from "./conversation";
 import { escapeHtml } from "./helpers";
 
 /**
  * Render a resume command footer with copy button and source path.
  */
 export function renderSessionFooter(sessionId: string, projectPath: string, sourcePath: string): string {
-  const resumeCmd = `cd ${projectPath} && claude --resume ${sessionId}`;
+  const isCodexSession = sourcePath.includes("/.codex/sessions/");
+  const resumeCmd = isCodexSession
+    ? `cd ${projectPath} && codex resume ${sessionId}`
+    : `cd ${projectPath} && claude --resume ${sessionId}`;
   let html = `<div class="session-footer">`;
   html += `<div class="session-footer-resume">`;
   html += `<code>${escapeHtml(resumeCmd)}</code>`;
@@ -47,7 +50,11 @@ export function renderSessionDetail(db: Database, sessionId: string): string {
   html += `</div></div>`;
 
   if (session.conversation_markdown) {
-    html += renderConversation(session.conversation_markdown);
+    html += renderConversation(
+      session.conversation_markdown,
+      inferUserDisplayName(session.project_path),
+      inferAssistantDisplayName(session.source_path)
+    );
   } else {
     html += '<div class="empty-state">No conversation data.</div>';
   }

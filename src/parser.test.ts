@@ -10,6 +10,8 @@ describe("parseSession", () => {
     const session = parseSession(fixturePath);
     expect(session.sessionId).toBe("test-session-1");
     expect(session.projectPath).toBe("/Users/jesse/projects/myapp");
+    expect(session.userDisplayName).toBe("jesse");
+    expect(session.assistantDisplayName).toBe("Claude");
     expect(session.gitBranch).toBe("main");
     expect(session.version).toBe("2.1.25");
     expect(session.startedAt).toBeTruthy();
@@ -49,10 +51,10 @@ describe("parseSession", () => {
     const session = parseSession(fixturePath);
     const md = session.toMarkdown();
     expect(md).toContain("# Session: myapp");
-    expect(md).toContain("**User (2026-02-02 17:37):** Fix the login bug");
+    expect(md).toContain("**jesse (2026-02-02 17:37):** Fix the login bug");
     expect(md).toContain("**Claude (2026-02-02 17:37):** I'll investigate the login flow.");
     expect(md).toContain("**Claude (2026-02-02 17:38):** Found the bug.");
-    expect(md).toContain("**User (2026-02-02 17:39):** Great, fix it please");
+    expect(md).toContain("**jesse (2026-02-02 17:39):** Great, fix it please");
     expect(md).not.toContain("thinking");
     expect(md).not.toContain("tool_use");
     expect(md).not.toContain("tool_result");
@@ -67,6 +69,8 @@ describe("parseSession", () => {
     const session = parseSession(codexFixturePath);
     expect(session.sessionId).toBe("019bf429-646d-70c2-a8b8-a0d69db3f01d");
     expect(session.projectPath).toBe("/Users/peteror/Code/engineering-notebook");
+    expect(session.userDisplayName).toBe("peteror");
+    expect(session.assistantDisplayName).toBe("Codex");
     expect(session.version).toBe("0.99.0-alpha.23");
     expect(session.gitBranch).toBe("main");
   });
@@ -78,6 +82,12 @@ describe("parseSession", () => {
     expect(session.messages[0]?.text).toBe("Please add Codex support.");
     expect(session.messages[1]?.role).toBe("assistant");
     expect(session.messages[1]?.text).toContain("I'll add Codex support.");
+  });
+
+  test("uses Codex label in markdown for Codex sessions", () => {
+    const session = parseSession(codexFixturePath);
+    const md = session.toMarkdown();
+    expect(md).toContain("**Codex (2026-02-24 09:00):** I'll add Codex support.");
   });
 
   test("skips Codex bootstrap user messages", () => {

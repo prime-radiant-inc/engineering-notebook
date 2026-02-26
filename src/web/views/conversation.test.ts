@@ -9,9 +9,9 @@ describe("renderConversation", () => {
 
   test("renders user message with outset label and inline timestamp", () => {
     const md = "**User (2026-02-21 17:37):** Fix the login bug";
-    const html = renderConversation(md);
+    const html = renderConversation(md, "peteror");
     expect(html).toContain("msg-label");
-    expect(html).toContain("Jesse");
+    expect(html).toContain("peteror");
     expect(html).toContain("msg-body-user");
     expect(html).toContain("Fix the login bug");
     expect(html).toContain("5:37 PM");
@@ -70,8 +70,24 @@ describe("renderConversation", () => {
       "**Human (2026-02-21 17:37):** First",
       "**Assistant (2026-02-21 17:37):** Second",
     ].join("\n");
-    const html = renderConversation(md);
-    expect(html).toContain("Jesse");
+    const html = renderConversation(md, "peteror");
+    expect(html).toContain("peteror");
     expect(html).toContain("Claude");
+  });
+
+  test("renders explicit user labels from markdown", () => {
+    const md = "**peteror (2026-02-21 17:37):** Hello";
+    const html = renderConversation(md);
+    expect(html).toContain("peteror");
+  });
+
+  test("can remap Claude/Assistant labels to Codex for legacy codex transcripts", () => {
+    const md = [
+      "**Claude (2026-02-21 17:37):** First",
+      "**Assistant (2026-02-21 17:38):** Second",
+    ].join("\n");
+    const html = renderConversation(md, "peteror", "Codex");
+    expect(html).toContain("Codex");
+    expect(html).not.toContain("msg-label\">Claude");
   });
 });

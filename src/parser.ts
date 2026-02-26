@@ -14,6 +14,8 @@ export type ParsedSession = {
   parentSessionId: string | null;
   projectPath: string;
   projectName: string;
+  userDisplayName: string;
+  assistantDisplayName: string;
   gitBranch: string | null;
   version: string | null;
   startedAt: string;
@@ -45,6 +47,7 @@ type CodexRecord = {
   payload?: {
     id?: string;
     cwd?: string;
+    originator?: string;
     cli_version?: string;
     git?: {
       branch?: string;
@@ -70,6 +73,16 @@ type ContentBlock = {
 function projectNameFromPath(projectPath: string): string {
   const parts = projectPath.split("/").filter(Boolean);
   return parts[parts.length - 1] || "unknown";
+}
+
+function userDisplayNameFromPath(projectPath: string): string {
+  const unixHomeMatch = projectPath.match(/^\/(?:Users|home)\/([^/]+)/);
+  if (unixHomeMatch?.[1]) return unixHomeMatch[1];
+
+  const windowsHomeMatch = projectPath.match(/^[A-Za-z]:\\Users\\([^\\]+)/);
+  if (windowsHomeMatch?.[1]) return windowsHomeMatch[1];
+
+  return "User";
 }
 
 /** Format a UTC ISO timestamp to HH:MM using UTC hours/minutes */
@@ -146,6 +159,7 @@ export function parseSession(filePath: string): ParsedSession {
   let lastTimestamp: string | null = null;
   const messages: ParsedMessage[] = [];
   let codexFormat = false;
+  let assistantDisplayName = "Claude";
 
   for (const line of lines) {
     let parsed: RawRecord | CodexRecord;
@@ -165,6 +179,9 @@ export function parseSession(filePath: string): ParsedSession {
       }
 
       if (codexRecord.type === "session_meta") {
+        if (codexRecord.payload?.originator?.toLowerCase().includes("codex")) {
+          assistantDisplayName = "Codex";
+        }
         if (codexRecord.payload?.id) sessionId = codexRecord.payload.id;
         if (codexRecord.payload?.cwd && !projectPath) projectPath = codexRecord.payload.cwd;
         if (codexRecord.payload?.cli_version && !version) version = codexRecord.payload.cli_version;
@@ -244,12 +261,18 @@ export function parseSession(filePath: string): ParsedSession {
   }
 
   const projectName = projectNameFromPath(projectPath);
+  const userDisplayName = userDisplayNameFromPath(projectPath);
+  if (codexFormat && assistantDisplayName === "Claude") {
+    assistantDisplayName = "Codex";
+  }
 
   return {
     sessionId,
     parentSessionId,
     projectPath,
     projectName,
+    userDisplayName,
+    assistantDisplayName,
     gitBranch,
     version,
     startedAt: firstTimestamp || "",
@@ -268,7 +291,7 @@ export function parseSession(filePath: string): ParsedSession {
 
       for (const msg of messages) {
         const time = msg.timestamp.slice(0, 16).replace("T", " ");
-        const speaker = msg.role === "user" ? "User" : "Claude";
+        const speaker = msg.role === "user" ? userDisplayName : assistantDisplayName;
         const firstLine = msg.text.split("\n")[0];
         const truncated = msg.text.includes("\n")
           ? firstLine + " [...]"

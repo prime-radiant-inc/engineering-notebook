@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { escapeHtml, formatDateShort, formatDate, formatTimeAmPm, formatTime, groupByTimeBucket } from "./helpers";
-import { renderConversation } from "./conversation";
+import { inferAssistantDisplayName, inferUserDisplayName, renderConversation } from "./conversation";
 import { renderSessionFooter } from "./session";
 
 type JournalEntryRow = {
@@ -168,7 +168,12 @@ export function renderEntryConversations(db: Database, entryId: number, sessionI
   const idx = Math.max(0, Math.min(sessionIndex, sessionIds.length - 1));
   const sessionId = sessionIds[idx]!;
 
-  const convo = db.query(`SELECT conversation_markdown FROM conversations WHERE session_id = ?`).get(sessionId) as { conversation_markdown: string } | null;
+  const convo = db.query(`
+    SELECT c.conversation_markdown, s.project_path, s.source_path
+    FROM conversations c
+    JOIN sessions s ON s.id = c.session_id
+    WHERE c.session_id = ?
+  `).get(sessionId) as { conversation_markdown: string; project_path: string; source_path: string } | null;
 
   let html = `<button class="panel-dismiss" onclick="this.parentElement.innerHTML='<div class=\\'empty-state\\'>Select an entry to view conversations.</div>'">&times;</button>`;
   // Session navigator
@@ -185,7 +190,11 @@ export function renderEntryConversations(db: Database, entryId: number, sessionI
   }
 
   if (convo) {
-    html += renderConversation(convo.conversation_markdown);
+    html += renderConversation(
+      convo.conversation_markdown,
+      inferUserDisplayName(convo.project_path),
+      inferAssistantDisplayName(convo.source_path)
+    );
   } else {
     html += '<div class="empty-state">Conversation not available.</div>';
   }
