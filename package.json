@@ -12,6 +12,12 @@
   "bin": {
     "engineering-notebook": "src/index.ts"
   },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bun --bun node_modules/.bin/tsc --noEmit",
+    "check": "bun test && bun run typecheck",
+    "prepare": "git config core.hooksPath .githooks"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.9"
   },

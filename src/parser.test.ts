@@ -27,8 +27,8 @@ describe("parseSession", () => {
     const session = parseSession(fixturePath);
     const userMessages = session.messages.filter((m) => m.role === "user");
     expect(userMessages.length).toBe(2);
-    expect(userMessages[0].text).toBe("Fix the login bug");
-    expect(userMessages[1].text).toBe("Great, fix it please");
+    expect(userMessages[0]!.text).toBe("Fix the login bug");
+    expect(userMessages[1]!.text).toBe("Great, fix it please");
   });
 
   test("skips thinking blocks from assistant", () => {

@@ -19,8 +19,8 @@ async function getClaudeAuthIssue(): Promise<string | null> {
   }
 
   const [stdout, stderr, exitCode] = await Promise.all([
-    readStream(proc.stdout),
-    readStream(proc.stderr),
+    readStream(proc.stdout as ReadableStream<Uint8Array> | null),
+    readStream(proc.stderr as ReadableStream<Uint8Array> | null),
     proc.exited,
   ]);
 
@@ -105,7 +105,7 @@ export function splitConversationByDay(
     );
     if (match) {
       foundAny = true;
-      currentDay = logicalDate(match[1], dayStartHour);
+      currentDay = logicalDate(match[1]!, dayStartHour);
       if (!byDay.has(currentDay)) byDay.set(currentDay, []);
       byDay.get(currentDay)!.push(line);
     } else if (currentDay) {
@@ -290,7 +290,7 @@ export function parseSummaryResponse(response: string): SummaryResult {
   const trimmed = response.trim();
   const skipMatch = trimmed.match(/^SKIP:\s*(.+)/);
   if (skipMatch) {
-    return { skipped: true, skipReason: skipMatch[1].trim() };
+    return { skipped: true, skipReason: skipMatch[1]!.trim() };
   }
 
   const headlineMatch = response.match(
@@ -306,13 +306,13 @@ export function parseSummaryResponse(response: string): SummaryResult {
     /OPEN_QUESTIONS:\s*([\s\S]*?)$/
   );
 
-  const headline = headlineMatch ? headlineMatch[1].trim() : "";
-  const summary = summaryMatch ? summaryMatch[1].trim() : response.trim();
+  const headline = headlineMatch ? headlineMatch[1]!.trim() : "";
+  const summary = summaryMatch ? summaryMatch[1]!.trim() : response.trim();
 
   let topics: string[] = [];
   if (topicsSection) {
     try {
-      topics = JSON.parse(topicsSection[1].trim());
+      topics = JSON.parse(topicsSection[1]!.trim());
     } catch {
       topics = [];
     }
@@ -321,7 +321,7 @@ export function parseSummaryResponse(response: string): SummaryResult {
   let openQuestions: string[] = [];
   if (openQuestionsSection) {
     try {
-      openQuestions = JSON.parse(openQuestionsSection[1].trim());
+      openQuestions = JSON.parse(openQuestionsSection[1]!.trim());
     } catch {
       openQuestions = [];
     }
