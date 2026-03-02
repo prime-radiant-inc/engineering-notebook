@@ -90,10 +90,10 @@ describe("server", () => {
       expect(res.status).toBe(302);
       const saved = loadConfig(configPath);
       expect(saved.remote_sources).toHaveLength(2);
-      expect(saved.remote_sources[0].name).toBe("Work MacBook");
-      expect(saved.remote_sources[0].host).toBe("jesse@macbook.local");
-      expect(saved.remote_sources[1].name).toBe("Home Desktop");
-      expect(saved.remote_sources[1].path).toBe("/data/claude/projects");
+      expect(saved.remote_sources[0]!.name).toBe("Work MacBook");
+      expect(saved.remote_sources[0]!.host).toBe("jesse@macbook.local");
+      expect(saved.remote_sources[1]!.name).toBe("Home Desktop");
+      expect(saved.remote_sources[1]!.path).toBe("/data/claude/projects");
     });
 
     test("saves remote sources with sequential indices", async () => {
@@ -116,8 +116,8 @@ describe("server", () => {
       expect(res.status).toBe(302);
       const saved = loadConfig(configPath);
       expect(saved.remote_sources).toHaveLength(2);
-      expect(saved.remote_sources[0].enabled).toBe(true);
-      expect(saved.remote_sources[1].enabled).toBe(false);
+      expect(saved.remote_sources[0]!.enabled).toBe(true);
+      expect(saved.remote_sources[1]!.enabled).toBe(false);
     });
 
     test("saves mix of sequential and timestamp indices", async () => {

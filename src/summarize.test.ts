@@ -38,15 +38,15 @@ describe("summarize", () => {
   test("groupSessionsByDateAndProject groups correctly", () => {
     const groups = groupSessionsByDateAndProject(db);
     expect(groups.length).toBe(1);
-    expect(groups[0].date).toBe("2026-02-02");
-    expect(groups[0].projectId).toBe("myapp");
-    expect(groups[0].sessionIds).toEqual(["s1", "s2"]);
-    expect(groups[0].conversations.length).toBe(2);
+    expect(groups[0]!.date).toBe("2026-02-02");
+    expect(groups[0]!.projectId).toBe("myapp");
+    expect(groups[0]!.sessionIds).toEqual(["s1", "s2"]);
+    expect(groups[0]!.conversations.length).toBe(2);
   });
 
   test("buildSummaryPrompt produces valid prompt", () => {
     const groups = groupSessionsByDateAndProject(db);
-    const prompt = buildSummaryPrompt(groups[0]);
+    const prompt = buildSummaryPrompt(groups[0]!);
     expect(prompt).toContain("Fix the bug");
     expect(prompt).toContain("Add tests");
     expect(prompt).toContain("engineering journal entry");
@@ -223,17 +223,17 @@ describe("groupSessionsByDateAndProject - midnight spanning", () => {
     const sorted = groups.sort((a, b) => a.date.localeCompare(b.date));
 
     // Feb 20: messages at 22:00, 22:10, 01:30, 01:35 (all logical date Feb 20)
-    expect(sorted[0].date).toBe("2026-02-20");
-    expect(sorted[0].projectId).toBe("myapp");
-    expect(sorted[0].sessionIds).toEqual(["s-midnight"]);
-    expect(sorted[0].conversations[0]).toContain("Late night refactor");
-    expect(sorted[0].conversations[0]).toContain("Still at it");
+    expect(sorted[0]!.date).toBe("2026-02-20");
+    expect(sorted[0]!.projectId).toBe("myapp");
+    expect(sorted[0]!.sessionIds).toEqual(["s-midnight"]);
+    expect(sorted[0]!.conversations[0]).toContain("Late night refactor");
+    expect(sorted[0]!.conversations[0]).toContain("Still at it");
 
     // Feb 21: messages at 06:00, 06:05 (logical date Feb 21)
-    expect(sorted[1].date).toBe("2026-02-21");
-    expect(sorted[1].projectId).toBe("myapp");
-    expect(sorted[1].sessionIds).toEqual(["s-midnight"]);
-    expect(sorted[1].conversations[0]).toContain("Morning review");
+    expect(sorted[1]!.date).toBe("2026-02-21");
+    expect(sorted[1]!.projectId).toBe("myapp");
+    expect(sorted[1]!.sessionIds).toEqual(["s-midnight"]);
+    expect(sorted[1]!.conversations[0]).toContain("Morning review");
   });
 
   test("filters out already-summarized date+project combos", () => {
@@ -246,13 +246,13 @@ describe("groupSessionsByDateAndProject - midnight spanning", () => {
     const groups = groupSessionsByDateAndProject(db);
     // Only Feb 21 should remain
     expect(groups.length).toBe(1);
-    expect(groups[0].date).toBe("2026-02-21");
+    expect(groups[0]!.date).toBe("2026-02-21");
   });
 
   test("filterDate works with logical dates", () => {
     const groups = groupSessionsByDateAndProject(db, "2026-02-21");
     expect(groups.length).toBe(1);
-    expect(groups[0].date).toBe("2026-02-21");
-    expect(groups[0].conversations[0]).toContain("Morning review");
+    expect(groups[0]!.date).toBe("2026-02-21");
+    expect(groups[0]!.conversations[0]).toContain("Morning review");
   });
 });

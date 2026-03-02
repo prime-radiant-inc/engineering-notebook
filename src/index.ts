@@ -17,7 +17,7 @@ switch (command) {
     const sources = config.sources.map(expandPath);
     const sourceIdx = process.argv.indexOf("--source");
     if (sourceIdx !== -1 && process.argv[sourceIdx + 1]) {
-      sources.push(expandPath(process.argv[sourceIdx + 1]));
+      sources.push(expandPath(process.argv[sourceIdx + 1]!));
     }
 
     // Sync remote sources
@@ -102,7 +102,7 @@ switch (command) {
 
     const port = (() => {
       const portIdx = process.argv.indexOf("--port");
-      return portIdx !== -1 ? parseInt(process.argv[portIdx + 1]) : config.port;
+      return portIdx !== -1 ? parseInt(process.argv[portIdx + 1]!) : config.port;
     })();
 
     console.log(`Engineering Notebook running at http://localhost:${port}`);
