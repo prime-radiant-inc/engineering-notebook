@@ -111,7 +111,7 @@ export function renderProjectTimeline(db: Database, projectId: string, selectedE
   const entries = db.query(`
     SELECT je.id, je.date, je.headline, je.summary, je.topics, je.session_ids, je.open_questions
     FROM journal_entries je
-    WHERE je.project_id = ?
+    WHERE je.project_id = ? AND je.headline != ''
     ORDER BY je.date DESC
   `).all(projectId) as ProjectEntryRow[];
 
@@ -193,7 +193,7 @@ export function renderProjectsPage(db: Database, projectId?: string, entryId?: n
     panel3 = renderEntryConversations(db, entryId);
   } else {
     const firstEntry = db.query(`
-      SELECT id FROM journal_entries WHERE project_id = ? ORDER BY date DESC LIMIT 1
+      SELECT id FROM journal_entries WHERE project_id = ? AND headline != '' ORDER BY date DESC LIMIT 1
     `).get(projectId) as { id: number } | null;
     if (firstEntry) {
       panel3 = renderEntryConversations(db, firstEntry.id);

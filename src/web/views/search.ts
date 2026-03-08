@@ -21,7 +21,7 @@ export function renderSearchResults(db: Database, query: string): string {
     SELECT je.id, je.date, je.project_id, p.display_name, je.headline, je.summary, je.topics
     FROM journal_entries je
     JOIN projects p ON je.project_id = p.id
-    WHERE je.summary LIKE ? OR je.topics LIKE ? OR je.headline LIKE ?
+    WHERE (je.summary LIKE ? OR je.topics LIKE ? OR je.headline LIKE ?) AND je.headline != ''
     ORDER BY je.date DESC
     LIMIT 20
   `).all(pattern, pattern, pattern) as {
