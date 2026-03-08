@@ -28,6 +28,7 @@ export function renderJournalDateIndex(db: Database, selectedDate?: string): str
     SELECT je.date, GROUP_CONCAT(DISTINCT p.display_name) as projects
     FROM journal_entries je
     JOIN projects p ON je.project_id = p.id
+    WHERE je.headline != ''
     GROUP BY je.date
     ORDER BY je.date DESC
   `).all() as DateProjectsRow[];
@@ -64,7 +65,7 @@ export function renderJournalEntries(db: Database, date: string, selectedEntryId
     SELECT je.id, je.date, je.project_id, p.display_name, je.headline, je.summary, je.topics, je.session_ids, je.open_questions
     FROM journal_entries je
     JOIN projects p ON je.project_id = p.id
-    WHERE je.date = ?
+    WHERE je.date = ? AND je.headline != ''
     ORDER BY p.display_name
   `).all(date) as JournalEntryRow[];
 
@@ -135,7 +136,7 @@ export function renderJournalPage(db: Database, date?: string, entryId?: number)
 } {
   // If no date specified, use the most recent
   if (!date) {
-    const row = db.query(`SELECT date FROM journal_entries ORDER BY date DESC LIMIT 1`).get() as { date: string } | null;
+    const row = db.query(`SELECT date FROM journal_entries WHERE headline != '' ORDER BY date DESC LIMIT 1`).get() as { date: string } | null;
     date = row?.date;
   }
 
