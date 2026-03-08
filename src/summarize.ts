@@ -281,7 +281,7 @@ Here are the session transcripts:
 ${conversationText}`;
 }
 
-type SummaryResult =
+export type SummaryResult =
   | { skipped: true; skipReason: string }
   | { skipped: false; headline: string; summary: string; topics: string[]; openQuestions: string[] };
 
@@ -330,6 +330,57 @@ export function parseSummaryResponse(response: string): SummaryResult {
   return { skipped: false, headline, summary, topics, openQuestions };
 }
 
+/** Persist a summary result (or skip stub) to the DB */
+export function upsertJournalEntry(
+  db: Database,
+  group: SessionGroup,
+  result: SummaryResult
+): void {
+  if (result.skipped) {
+    db.prepare(
+      `
+      INSERT INTO journal_entries
+        (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+      VALUES (?, ?, ?, '', ?, '[]', '[]', datetime('now'), ?)
+      ON CONFLICT(date, project_id) DO UPDATE SET
+        session_ids = excluded.session_ids,
+        generated_at = excluded.generated_at
+      `
+    ).run(
+      group.date,
+      group.projectId,
+      JSON.stringify(group.sessionIds),
+      result.skipReason,
+      SUMMARIZE_MODEL
+    );
+    return;
+  }
+
+  db.prepare(
+    `
+    INSERT INTO journal_entries
+      (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+    ON CONFLICT(date, project_id) DO UPDATE SET
+      headline = excluded.headline,
+      summary = excluded.summary,
+      topics = excluded.topics,
+      open_questions = excluded.open_questions,
+      generated_at = excluded.generated_at,
+      session_ids = excluded.session_ids
+    `
+  ).run(
+    group.date,
+    group.projectId,
+    JSON.stringify(group.sessionIds),
+    result.headline,
+    result.summary,
+    JSON.stringify(result.topics),
+    JSON.stringify(result.openQuestions),
+    SUMMARIZE_MODEL
+  );
+}
+
 /** Run LLM summarization using Claude Agent SDK */
 export async function summarizeGroup(
   group: SessionGroup,
@@ -373,34 +424,8 @@ export async function summarizeGroup(
 
   const parsed = parseSummaryResponse(responseText);
 
-  if (parsed.skipped) {
-    return { skipped: true, skipReason: parsed.skipReason };
-  }
-
-  db.prepare(
-    `
-    INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
-    ON CONFLICT(date, project_id) DO UPDATE SET
-      headline = excluded.headline,
-      summary = excluded.summary,
-      topics = excluded.topics,
-      open_questions = excluded.open_questions,
-      generated_at = excluded.generated_at,
-      session_ids = excluded.session_ids
-  `
-  ).run(
-    group.date,
-    group.projectId,
-    JSON.stringify(group.sessionIds),
-    parsed.headline,
-    parsed.summary,
-    JSON.stringify(parsed.topics),
-    JSON.stringify(parsed.openQuestions),
-    SUMMARIZE_MODEL
-  );
-
-  return { skipped: false };
+  upsertJournalEntry(db, group, parsed);
+  return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
 }
 
 /** Summarize all unsummarized groups */
