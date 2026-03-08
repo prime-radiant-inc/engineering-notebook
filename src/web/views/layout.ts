@@ -320,7 +320,7 @@ export function renderLayout(title: string, content: LayoutContent): string {
       position: relative;
     }
     .msg { margin-bottom: 10px; position: relative; }
-    .msg-speaker-change { padding-top: 10px; border-top: 1px solid var(--border-subtle); }
+    .msg-speaker-change { margin-top: 10px; border-top: 1px solid var(--border-subtle); }
     .msg-label {
       position: absolute;
       left: -84px;
