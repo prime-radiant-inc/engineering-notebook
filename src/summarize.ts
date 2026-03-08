@@ -339,18 +339,18 @@ export function upsertJournalEntry(
   if (result.skipped) {
     db.prepare(
       `
-      INSERT INTO journal_entries
-        (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
-      VALUES (?, ?, ?, '', ?, '[]', '[]', datetime('now'), ?)
-      ON CONFLICT(date, project_id) DO UPDATE SET
-        session_ids = excluded.session_ids,
-        generated_at = excluded.generated_at
-      `
+    INSERT INTO journal_entries
+      (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+    VALUES (?, ?, ?, '', ?, '[]', '[]', datetime('now'), ?)
+    ON CONFLICT(date, project_id) DO UPDATE SET
+      session_ids = excluded.session_ids,
+      generated_at = excluded.generated_at
+    `
     ).run(
       group.date,
       group.projectId,
       JSON.stringify(group.sessionIds),
-      result.skipReason,
+      result.skipReason || "No reason given",
       SUMMARIZE_MODEL
     );
     return;
