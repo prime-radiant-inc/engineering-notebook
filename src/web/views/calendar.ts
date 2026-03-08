@@ -74,7 +74,9 @@ function queryActivity(
     SELECT je.date, je.project_id, p.display_name, je.headline, je.id as entry_id
     FROM journal_entries je
     JOIN projects p ON je.project_id = p.id
-    WHERE je.date BETWEEN ? AND ?${ex.sql.replace(/\bid\b/g, "p.id")}
+    WHERE je.date BETWEEN ? AND ?
+      AND je.headline != ''
+      ${ex.sql.replace(/\bid\b/g, "p.id")}
     ORDER BY je.date, p.display_name
   `).all(startDate, endDate, ...ex.params) as {
     date: string; project_id: string; display_name: string; headline: string; entry_id: number;
@@ -290,7 +292,7 @@ export function renderIcalFeed(db: Database, exclude: string[]): string {
     SELECT je.id, je.date, je.headline, je.summary, je.generated_at, p.display_name
     FROM journal_entries je
     JOIN projects p ON je.project_id = p.id
-    WHERE 1=1${ex.sql.replace(/\bid\b/g, "p.id")}
+    WHERE je.headline != ''${ex.sql.replace(/\bid\b/g, "p.id")}
     ORDER BY je.date DESC
   `).all(...ex.params) as {
     id: number; date: string; headline: string; summary: string;
