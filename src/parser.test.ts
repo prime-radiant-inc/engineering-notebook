@@ -4,6 +4,7 @@ import { join } from "path";
 
 const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.jsonl");
 const codexFixturePath = join(import.meta.dir, "../tests/fixtures/test-codex-session-1.jsonl");
+const subagentFixturePath = join(import.meta.dir, "../tests/fixtures/parent-session-id/subagents/agent-aba4e4e.jsonl");
 
 describe("parseSession", () => {
   test("extracts session metadata", () => {
@@ -85,5 +86,25 @@ describe("parseSession", () => {
     const joined = session.messages.map((m) => m.text).join("\n");
     expect(joined).not.toContain("# AGENTS.md instructions");
     expect(joined).not.toContain("<environment_context>");
+  });
+
+  test("parses subagent files without skipping records", () => {
+    // Subagent files have the parent sessionId in every record,
+    // but this should NOT trigger continuation detection.
+    const session = parseSession(subagentFixturePath);
+    // Should have 3 messages: 1 user + 2 assistant text messages
+    expect(session.messages.length).toBe(3);
+    expect(session.messages[0].role).toBe("user");
+    expect(session.messages[0].text).toBe("Refactor the auth module");
+    expect(session.messages[1].role).toBe("assistant");
+    expect(session.messages[1].text).toBe("I'll refactor the auth module now.");
+    expect(session.messages[2].role).toBe("assistant");
+    expect(session.messages[2].text).toBe("Done refactoring the auth module.");
+  });
+
+  test("subagent file preserves timestamps", () => {
+    const session = parseSession(subagentFixturePath);
+    expect(session.startedAt).toBeTruthy();
+    expect(session.endedAt).toBeTruthy();
   });
 });

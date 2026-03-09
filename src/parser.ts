@@ -195,10 +195,13 @@ export function parseSession(filePath: string): ParsedSession {
 
     const record = parsed as RawRecord;
 
-    // Track the first sessionId we see to detect continuations
+    // Track the first sessionId we see to detect continuations.
+    // Subagent files (path contains /subagents/) always have the parent's
+    // sessionId in every record — this is expected, not a continuation.
+    const isSubagentFile = filePath.includes("/subagents/");
     if (record.sessionId && !firstRecordSessionId) {
       firstRecordSessionId = record.sessionId;
-      if (firstRecordSessionId !== fileSessionId) {
+      if (!isSubagentFile && firstRecordSessionId !== fileSessionId) {
         parentSessionId = firstRecordSessionId;
       }
     }
