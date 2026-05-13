@@ -154,6 +154,73 @@ switch (command) {
     closeDb();
     break;
   }
+  case "rollup": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+
+    const periodFlag = process.argv.indexOf("--period");
+    const period = periodFlag !== -1 ? process.argv[periodFlag + 1] : "week";
+    if (period !== "week") {
+      console.error(`Only --period week is supported in this version (got: ${period}).`);
+      closeDb();
+      process.exit(1);
+    }
+
+    const projectIdx = process.argv.indexOf("--project");
+    const filterProject = projectIdx !== -1 ? process.argv[projectIdx + 1] : undefined;
+    const weekIdx = process.argv.indexOf("--week");
+    const filterWeek = weekIdx !== -1 ? process.argv[weekIdx + 1] : undefined;
+    const all = process.argv.includes("--all");
+
+    const { findUnrolledWeeks, rollupWeek, weekStart } = await import("./rollup");
+
+    let targets = findUnrolledWeeks(db);
+    if (filterProject) targets = targets.filter((t) => t.projectId === filterProject);
+    if (filterWeek) {
+      const monday = weekStart(filterWeek);
+      targets = targets.filter((t) => t.weekMonday === monday);
+    }
+
+    if (targets.length === 0) {
+      console.log("No unrolled (week, project) tuples match the filters.");
+      closeDb();
+      break;
+    }
+
+    if (!all && !filterProject && !filterWeek) {
+      console.log(`Found ${targets.length} unrolled (week, project) tuple(s).`);
+      console.log("Use --all to roll up everything, or --project/--week to filter.");
+      closeDb();
+      break;
+    }
+
+    let rolled = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i]!;
+      const tag = `[${i + 1}/${targets.length}]`;
+      console.log(`${tag} Rolling up ${t.projectName} (week of ${t.weekMonday}, ${t.entryCount} daily entries)...`);
+      try {
+        const result = await rollupWeek(db, t.projectId, t.weekMonday, config);
+        if (result.skipped) {
+          skipped++;
+          console.log(`${tag} ⊘ ${t.projectName} (week of ${t.weekMonday}): ${result.skipReason}`);
+        } else {
+          rolled++;
+          console.log(`${tag} ✓ ${t.projectName} (week of ${t.weekMonday}): ${result.headline}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${t.projectName} week of ${t.weekMonday}: ${msg}`);
+        console.error(`${tag} ✗ ${t.projectName} (week of ${t.weekMonday}): ${msg}`);
+      }
+    }
+
+    console.log(`\nRolled up: ${rolled}, Skipped: ${skipped}, Errors: ${errors.length}`);
+    closeDb();
+    break;
+  }
   case "serve": {
     const config = loadConfig();
     const db = initDb(config.db_path);
@@ -179,6 +246,6 @@ switch (command) {
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|serve|config>");
+    console.log("Usage: notebook <ingest|summarize|rollup|serve|config>");
     process.exit(1);
 }

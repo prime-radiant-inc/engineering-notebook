@@ -61,11 +61,29 @@ export function initDb(dbPath: string): Database {
       UNIQUE(date, project_id)
     );
 
+    CREATE TABLE IF NOT EXISTS journal_rollups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      period TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT '',
+      headline TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      topics TEXT NOT NULL DEFAULT '[]',
+      open_questions TEXT NOT NULL DEFAULT '[]',
+      sources_count INTEGER NOT NULL DEFAULT 0,
+      reaudited_dates TEXT NOT NULL DEFAULT '[]',
+      generated_at TEXT NOT NULL,
+      model_used TEXT NOT NULL,
+      UNIQUE(period, period_start, project_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
     CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
     CREATE INDEX IF NOT EXISTS idx_journal_project ON journal_entries(project_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source_path);
+    CREATE INDEX IF NOT EXISTS idx_rollups_period ON journal_rollups(period, period_start);
+    CREATE INDEX IF NOT EXISTS idx_rollups_project ON journal_rollups(project_id);
   `);
 
   // Migrations

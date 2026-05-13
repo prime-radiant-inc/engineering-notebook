@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { Config, SummaryProvider } from "./config";
 
-const CLAUDE_SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
+export const CLAUDE_SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
 
 type SummarizerConfig = Pick<
   Config,
@@ -12,7 +12,7 @@ type SummarizerConfig = Pick<
   | "summary_instructions"
 >;
 
-type ResolvedSummarizerSettings = {
+export type ResolvedSummarizerSettings = {
   provider: SummaryProvider;
   baseUrl: string;
   model: string;
@@ -415,7 +415,7 @@ export function upsertJournalEntry(
   );
 }
 
-async function summarizeWithClaude(prompt: string): Promise<string> {
+export async function summarizeWithClaude(prompt: string): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   let responseText = "";
   const env = { ...process.env };
@@ -462,7 +462,7 @@ export function buildOpenAICompatBody(
   };
 }
 
-async function summarizeWithOpenAICompat(
+export async function summarizeWithOpenAICompat(
   prompt: string,
   settings: ResolvedSummarizerSettings
 ): Promise<string> {
