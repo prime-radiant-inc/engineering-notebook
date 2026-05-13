@@ -62,6 +62,46 @@ switch (command) {
     const projectIdx = process.argv.indexOf("--project");
     const filterProject = projectIdx !== -1 ? process.argv[projectIdx + 1] : undefined;
     const all = process.argv.includes("--all");
+    const why = process.argv.includes("--why");
+
+    if (why) {
+      if (!filterDate || !filterProject) {
+        console.error("Usage: engineering-notebook summarize --why --date <date> --project <project>");
+        closeDb();
+        process.exit(1);
+      }
+      const { groupSessionsByDateAndProject, explainGroup } = await import("./summarize");
+      const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, config.day_start_hour);
+      if (groups.length === 0) {
+        console.error(`No unsummarized group found for date=${filterDate} project=${filterProject}.`);
+        console.error("Note: --why operates on unsummarized groups. To re-audit a summarized one, delete its journal_entries row first.");
+        closeDb();
+        process.exit(1);
+      }
+      const target = groups[0]!;
+      const explained = await explainGroup(target, config);
+      const rule = "-".repeat(60);
+      console.log(`# Audit: ${target.projectName} (${target.date})`);
+      console.log(`# Sessions: ${target.sessionIds.length}, conversation chunks: ${target.conversations.length}`);
+      console.log(`# Model: ${explained.modelUsed}\n`);
+      if (explained.requestBody) {
+        console.log(`## Request body sent\n${rule}\n${JSON.stringify(explained.requestBody, null, 2)}\n${rule}\n`);
+      } else {
+        console.log(`## Prompt sent\n${rule}\n${explained.prompt}\n${rule}\n`);
+      }
+      console.log(`## Raw response\n${rule}\n${explained.rawResponse}\n${rule}\n`);
+      console.log(`## Parsed`);
+      if (explained.parsed.skipped) {
+        console.log(`SKIPPED: ${explained.parsed.skipReason}`);
+      } else {
+        console.log(`HEADLINE: ${explained.parsed.headline}`);
+        console.log(`SUMMARY: ${explained.parsed.summary}`);
+        console.log(`TOPICS: ${JSON.stringify(explained.parsed.topics)}`);
+        console.log(`OPEN_QUESTIONS: ${JSON.stringify(explained.parsed.openQuestions)}`);
+      }
+      closeDb();
+      break;
+    }
 
     if (!filterDate && !filterProject && !all) {
       const { groupSessionsByDateAndProject } = await import("./summarize");
