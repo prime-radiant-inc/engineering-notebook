@@ -79,6 +79,16 @@ export function initDb(dbPath: string): Database {
   } catch {
     // Column already exists — ignore
   }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN source_size INTEGER`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN source_mtime TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
 
   _db = db;
   return db;

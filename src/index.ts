@@ -43,8 +43,13 @@ switch (command) {
 
     const result = ingestSessions(files, db, force);
     console.log(
-      `Ingested: ${result.ingested}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
+      `Ingested: ${result.ingested}, Re-ingested: ${result.reingested}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
     );
+    if (result.invalidatedJournals > 0) {
+      console.log(
+        `Invalidated ${result.invalidatedJournals} stale journal entr${result.invalidatedJournals === 1 ? "y" : "ies"} — re-run \`summarize\` to regenerate.`
+      );
+    }
     if (result.errors.length > 0) {
       for (const err of result.errors.slice(0, 10)) {
         console.error(`  ${err}`);
