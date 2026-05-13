@@ -133,6 +133,28 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
     const configPath = resolveConfigPath();
 
     config.summary_instructions = (body.summary_instructions as string) || "";
+    config.summary_provider =
+      (body.summary_provider as string) === "openai-compat" ? "openai-compat" : "claude";
+    config.summary_base_url = ((body.summary_base_url as string) || "").trim();
+    config.summary_model = ((body.summary_model as string) || "").trim();
+    const extrasRaw = ((body.summary_extras as string) || "").trim();
+    if (extrasRaw === "") {
+      config.summary_extras = {};
+    } else {
+      try {
+        const parsed = JSON.parse(extrasRaw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          config.summary_extras = parsed as Record<string, unknown>;
+        } else {
+          throw new Error("summary_extras must be a JSON object");
+        }
+      } catch (err) {
+        return c.text(
+          `Invalid summary_extras JSON: ${err instanceof Error ? err.message : String(err)}`,
+          400
+        );
+      }
+    }
     const dayStart = parseInt((body.day_start_hour as string) || "5", 10);
     config.day_start_hour = isNaN(dayStart) ? 5 : Math.max(0, Math.min(23, dayStart));
     config.sources = ((body.sources as string) || "").split("\n").map(s => s.trim()).filter(Boolean);

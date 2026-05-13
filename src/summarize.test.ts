@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { groupSessionsByDateAndProject, buildSummaryPrompt, parseSummaryResponse, logicalDate, splitConversationByDay } from "./summarize";
+import { groupSessionsByDateAndProject, buildSummaryPrompt, parseSummaryResponse, logicalDate, splitConversationByDay, resolveSummarizerSettings, buildOpenAICompatBody } from "./summarize";
 import { initDb, closeDb } from "./db";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -254,5 +254,69 @@ describe("groupSessionsByDateAndProject - midnight spanning", () => {
     expect(groups.length).toBe(1);
     expect(groups[0]!.date).toBe("2026-02-21");
     expect(groups[0]!.conversations[0]).toContain("Morning review");
+  });
+});
+
+describe("resolveSummarizerSettings", () => {
+  test("defaults to claude provider when no config given", () => {
+    const s = resolveSummarizerSettings();
+    expect(s.provider).toBe("claude");
+    expect(s.baseUrl).toBe("");
+    expect(s.model).toBe("");
+    expect(s.extras).toEqual({});
+  });
+
+  test("honors openai-compat provider with extras", () => {
+    const s = resolveSummarizerSettings({
+      summary_provider: "openai-compat",
+      summary_base_url: "http://localhost:11434",
+      summary_model: "qwen3.6:latest",
+      summary_extras: { reasoning_effort: "none" },
+    });
+    expect(s.provider).toBe("openai-compat");
+    expect(s.baseUrl).toBe("http://localhost:11434");
+    expect(s.model).toBe("qwen3.6:latest");
+    expect(s.extras).toEqual({ reasoning_effort: "none" });
+  });
+
+  test("trims whitespace from baseUrl and model", () => {
+    const s = resolveSummarizerSettings({
+      summary_provider: "openai-compat",
+      summary_base_url: "  http://x  ",
+      summary_model: "  m  ",
+      summary_extras: {},
+    });
+    expect(s.baseUrl).toBe("http://x");
+    expect(s.model).toBe("m");
+  });
+});
+
+describe("buildOpenAICompatBody", () => {
+  test("includes model, messages, stream:false, and extras", () => {
+    const body = buildOpenAICompatBody("hello", {
+      provider: "openai-compat",
+      baseUrl: "http://x",
+      model: "qwen3.6:latest",
+      extras: { reasoning_effort: "none", temperature: 0.2 },
+    });
+    expect(body).toEqual({
+      reasoning_effort: "none",
+      temperature: 0.2,
+      model: "qwen3.6:latest",
+      messages: [{ role: "user", content: "hello" }],
+      stream: false,
+    });
+  });
+
+  test("required keys override extras (extras can't break the request shape)", () => {
+    const body = buildOpenAICompatBody("hi", {
+      provider: "openai-compat",
+      baseUrl: "http://x",
+      model: "good-model",
+      extras: { model: "EVIL", messages: [], stream: true },
+    });
+    expect(body.model).toBe("good-model");
+    expect(body.messages).toEqual([{ role: "user", content: "hi" }]);
+    expect(body.stream).toBe(false);
   });
 });

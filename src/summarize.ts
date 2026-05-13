@@ -1,6 +1,36 @@
 import { Database } from "bun:sqlite";
+import type { Config, SummaryProvider } from "./config";
 
-const SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
+const CLAUDE_SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
+
+type SummarizerConfig = Pick<
+  Config,
+  | "summary_provider"
+  | "summary_base_url"
+  | "summary_model"
+  | "summary_extras"
+  | "summary_instructions"
+>;
+
+type ResolvedSummarizerSettings = {
+  provider: SummaryProvider;
+  baseUrl: string;
+  model: string;
+  extras: Record<string, unknown>;
+};
+
+export function resolveSummarizerSettings(
+  config?: Partial<SummarizerConfig>
+): ResolvedSummarizerSettings {
+  const provider: SummaryProvider =
+    config?.summary_provider === "openai-compat" ? "openai-compat" : "claude";
+  return {
+    provider,
+    baseUrl: config?.summary_base_url?.trim() ?? "",
+    model: config?.summary_model?.trim() ?? "",
+    extras: config?.summary_extras ?? {},
+  };
+}
 
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) return "";
@@ -337,7 +367,8 @@ export function parseSummaryResponse(response: string): SummaryResult {
 export function upsertJournalEntry(
   db: Database,
   group: SessionGroup,
-  result: SummaryResult
+  result: SummaryResult,
+  modelUsed: string = CLAUDE_SUMMARIZE_MODEL
 ): void {
   if (result.skipped) {
     db.prepare(
@@ -354,7 +385,7 @@ export function upsertJournalEntry(
       group.projectId,
       JSON.stringify(group.sessionIds),
       result.skipReason || "No reason given",
-      SUMMARIZE_MODEL
+      modelUsed
     );
     return;
   }
@@ -380,28 +411,20 @@ export function upsertJournalEntry(
     result.summary,
     JSON.stringify(result.topics),
     JSON.stringify(result.openQuestions),
-    SUMMARIZE_MODEL
+    modelUsed
   );
 }
 
-/** Run LLM summarization using Claude Agent SDK */
-export async function summarizeGroup(
-  group: SessionGroup,
-  db: Database,
-  summaryInstructions?: string
-): Promise<{ skipped: boolean; skipReason?: string }> {
+async function summarizeWithClaude(prompt: string): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const prompt = buildSummaryPrompt(group, summaryInstructions);
-
   let responseText = "";
-
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
   const result = query({
     prompt,
     options: {
-      model: SUMMARIZE_MODEL,
+      model: CLAUDE_SUMMARIZE_MODEL,
       maxTurns: 1,
       tools: [],
       permissionMode: "bypassPermissions",
@@ -422,13 +445,101 @@ export async function summarizeGroup(
     }
   }
 
-  if (!responseText.trim()) {
+  return responseText;
+}
+
+/** Build the request body sent to an OpenAI-compatible /v1/chat/completions endpoint.
+ *  Exported so audit tools (--why) can render the exact body that will be sent. */
+export function buildOpenAICompatBody(
+  prompt: string,
+  settings: ResolvedSummarizerSettings
+): Record<string, unknown> {
+  return {
+    ...settings.extras,
+    model: settings.model,
+    messages: [{ role: "user", content: prompt }],
+    stream: false,
+  };
+}
+
+async function summarizeWithOpenAICompat(
+  prompt: string,
+  settings: ResolvedSummarizerSettings
+): Promise<string> {
+  if (!settings.baseUrl) {
+    throw new Error(
+      "summary_base_url is empty — set it in config.json when summary_provider is \"openai-compat\"."
+    );
+  }
+  if (!settings.model) {
+    throw new Error(
+      "summary_model is empty — set it in config.json when summary_provider is \"openai-compat\"."
+    );
+  }
+  const base = settings.baseUrl.replace(/\/+$/, "");
+  const body = buildOpenAICompatBody(prompt, settings);
+  const res = await fetch(`${base}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errBody = (await res.text()).trim();
+    const details = errBody ? `: ${errBody}` : "";
+    throw new Error(
+      `OpenAI-compat request to ${base} failed (${res.status} ${res.statusText})${details}`
+    );
+  }
+
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+/** Run the LLM end-to-end without writing to the database.
+ *  Returns the prompt, raw response, parsed result, and model name.
+ *  Intended for audit/debugging tools like --why. */
+export async function explainGroup(
+  group: SessionGroup,
+  config?: Partial<SummarizerConfig>
+): Promise<{
+  prompt: string;
+  rawResponse: string;
+  parsed: SummaryResult;
+  modelUsed: string;
+  requestBody?: Record<string, unknown>;
+}> {
+  const prompt = buildSummaryPrompt(group, config?.summary_instructions);
+  const settings = resolveSummarizerSettings(config);
+  const modelUsed =
+    settings.provider === "openai-compat" ? settings.model : CLAUDE_SUMMARIZE_MODEL;
+
+  let rawResponse: string;
+  let requestBody: Record<string, unknown> | undefined;
+  if (settings.provider === "openai-compat") {
+    requestBody = buildOpenAICompatBody(prompt, settings);
+    rawResponse = await summarizeWithOpenAICompat(prompt, settings);
+  } else {
+    rawResponse = await summarizeWithClaude(prompt);
+  }
+
+  if (!rawResponse.trim()) {
     throw new Error("Empty response from LLM");
   }
 
-  const parsed = parseSummaryResponse(responseText);
+  const parsed = parseSummaryResponse(rawResponse);
+  return { prompt, rawResponse, parsed, modelUsed, requestBody };
+}
 
-  upsertJournalEntry(db, group, parsed);
+export async function summarizeGroup(
+  group: SessionGroup,
+  db: Database,
+  config?: Partial<SummarizerConfig>
+): Promise<{ skipped: boolean; skipReason?: string }> {
+  const { parsed, modelUsed } = await explainGroup(group, config);
+  upsertJournalEntry(db, group, parsed, modelUsed);
   return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
 }
 
@@ -439,15 +550,16 @@ export async function summarizeAll(
   filterProject?: string,
   onProgress?: (done: number, total: number, group: SessionGroup) => void,
   dayStartHour: number = 5,
-  summaryInstructions?: string
+  config?: Partial<SummarizerConfig>
 ): Promise<{ summarized: number; skipped: number; skipReasons: string[]; errors: string[] }> {
   const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, dayStartHour);
   let summarized = 0;
   let skipped = 0;
   const skipReasons: string[] = [];
   const errors: string[] = [];
+  const settings = resolveSummarizerSettings(config);
 
-  if (groups.length > 0) {
+  if (groups.length > 0 && settings.provider === "claude") {
     const authIssue = await getClaudeAuthIssue();
     if (authIssue) {
       errors.push(authIssue);
@@ -458,7 +570,7 @@ export async function summarizeAll(
   for (const group of groups) {
     try {
       onProgress?.(summarized + skipped, groups.length, group);
-      const result = await summarizeGroup(group, db, summaryInstructions);
+      const result = await summarizeGroup(group, db, config);
       if (result.skipped) {
         skipped++;
         if (result.skipReason) skipReasons.push(result.skipReason);

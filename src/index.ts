@@ -75,7 +75,7 @@ switch (command) {
     const { summarizeAll } = await import("./summarize");
     const result = await summarizeAll(db, filterDate, filterProject, (done, total, group) => {
       console.log(`[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`);
-    }, config.day_start_hour, config.summary_instructions);
+    }, config.day_start_hour, config);
 
     console.log(`Summarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`);
     if (result.skipped > 0) {

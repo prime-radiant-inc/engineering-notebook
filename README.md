@@ -99,6 +99,10 @@ Config lives at `~/.config/engineering-notebook/config.json`:
   "port": 3000,
   "day_start_hour": 5,
   "summary_instructions": "",
+  "summary_provider": "claude",
+  "summary_base_url": "",
+  "summary_model": "",
+  "summary_extras": {},
   "remote_sources": [],
   "auto_sync_interval": 60
 }
@@ -112,8 +116,48 @@ Config lives at `~/.config/engineering-notebook/config.json`:
 | `port`                 | Web server port                                                                          | `3000`                                         |
 | `day_start_hour`       | Hour (0-23) when a "day" starts (for grouping late-night sessions with the previous day) | `5`                                            |
 | `summary_instructions` | Custom instructions appended to the LLM summarization prompt                             | `""`                                           |
+| `summary_provider`     | Summary backend: `"claude"` or `"openai-compat"`                                         | `"claude"`                                     |
+| `summary_base_url`     | Base URL when using `openai-compat` (path `/v1/chat/completions` is appended)            | `""`                                           |
+| `summary_model`        | Model name when using `openai-compat`                                                    | `""`                                           |
+| `summary_extras`       | JSON object merged into the request body (server-specific options)                       | `{}`                                           |
 | `remote_sources`       | SSH remote sources to sync before ingesting                                              | `[]`                                           |
 | `auto_sync_interval`   | Seconds between auto-syncs when serving                                                  | `60`                                           |
+
+### OpenAI-compatible summarization
+
+To use a self-hosted or third-party model that speaks the OpenAI API protocol
+(Ollama, vLLM, llama.cpp `llama-server`, LM Studio, OpenAI itself, etc.), set:
+
+```json
+{
+  "summary_provider": "openai-compat",
+  "summary_base_url": "http://localhost:11434",
+  "summary_model": "qwen3.6:latest",
+  "summary_extras": { "reasoning_effort": "none" }
+}
+```
+
+The `summary_extras` object is merged verbatim into the request body, so any
+field your server understands can be set there. A few useful examples:
+
+| Server                                  | Suggested `summary_extras`                                              |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| Ollama (Qwen3, DeepSeek-R1, etc.)       | `{ "reasoning_effort": "none" }` — suppresses chain-of-thought          |
+| OpenAI proper                           | `{ "reasoning_effort": "low" }` for o-series; omit for chat models      |
+| vLLM / SGLang / llama.cpp with reasoning | `{ "chat_template_kwargs": { "enable_thinking": false } }`             |
+| Any server                              | `{ "temperature": 0.2 }`, `{ "max_tokens": 4096 }`, etc.                |
+
+Server diagnostics:
+
+```sh
+# List available models
+curl http://localhost:11434/v1/models
+
+# Smoke-test the endpoint
+curl -X POST http://localhost:11434/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"qwen3.6:latest","messages":[{"role":"user","content":"PONG"}]}'
+```
 
 ### Remote Sources
 

@@ -58,6 +58,10 @@ describe("server", () => {
   ): FormData {
     const form = new FormData();
     form.append("summary_instructions", "");
+    form.append("summary_provider", "claude");
+    form.append("summary_base_url", "");
+    form.append("summary_model", "");
+    form.append("summary_extras", "");
     form.append("day_start_hour", "5");
     form.append("sources", "~/.claude/projects");
     form.append("exclude", "-private-tmp*");
@@ -161,6 +165,56 @@ describe("server", () => {
       expect(res.status).toBe(302);
       const saved = loadConfig(configPath);
       expect(saved.auto_sync_interval).toBe(30);
+    });
+
+    test("saves openai-compat provider with base_url, model, and extras", async () => {
+      const app = createApp(db, syncManager);
+
+      const form = settingsForm();
+      form.set("summary_provider", "openai-compat");
+      form.set("summary_base_url", "http://localhost:11434");
+      form.set("summary_model", "qwen3.6:latest");
+      form.set("summary_extras", JSON.stringify({ reasoning_effort: "none" }));
+
+      const res = await app.request("/settings", {
+        method: "POST",
+        body: form,
+      });
+
+      expect(res.status).toBe(302);
+      const saved = loadConfig(configPath);
+      expect(saved.summary_provider).toBe("openai-compat");
+      expect(saved.summary_base_url).toBe("http://localhost:11434");
+      expect(saved.summary_model).toBe("qwen3.6:latest");
+      expect(saved.summary_extras).toEqual({ reasoning_effort: "none" });
+    });
+
+    test("rejects invalid summary_extras JSON with 400", async () => {
+      const app = createApp(db, syncManager);
+
+      const form = settingsForm();
+      form.set("summary_extras", "{not json");
+
+      const res = await app.request("/settings", {
+        method: "POST",
+        body: form,
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    test("rejects summary_extras that isn't a JSON object", async () => {
+      const app = createApp(db, syncManager);
+
+      const form = settingsForm();
+      form.set("summary_extras", '["array", "not", "object"]');
+
+      const res = await app.request("/settings", {
+        method: "POST",
+        body: form,
+      });
+
+      expect(res.status).toBe(400);
     });
   });
 
