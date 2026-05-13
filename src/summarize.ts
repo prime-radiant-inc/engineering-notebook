@@ -543,6 +543,11 @@ export async function summarizeGroup(
   return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
 }
 
+export type SummarizeOutcome =
+  | { kind: "summarized"; group: SessionGroup }
+  | { kind: "skipped"; group: SessionGroup; reason: string }
+  | { kind: "error"; group: SessionGroup; error: string };
+
 /** Summarize all unsummarized groups */
 export async function summarizeAll(
   db: Database,
@@ -550,7 +555,8 @@ export async function summarizeAll(
   filterProject?: string,
   onProgress?: (done: number, total: number, group: SessionGroup) => void,
   dayStartHour: number = 5,
-  config?: Partial<SummarizerConfig>
+  config?: Partial<SummarizerConfig>,
+  onComplete?: (done: number, total: number, outcome: SummarizeOutcome) => void
 ): Promise<{ summarized: number; skipped: number; skipReasons: string[]; errors: string[] }> {
   const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, dayStartHour);
   let summarized = 0;
@@ -573,12 +579,28 @@ export async function summarizeAll(
       const result = await summarizeGroup(group, db, config);
       if (result.skipped) {
         skipped++;
-        if (result.skipReason) skipReasons.push(result.skipReason);
+        const reason = result.skipReason || "no reason given";
+        skipReasons.push(`${group.projectName} (${group.date}): ${reason}`);
+        onComplete?.(summarized + skipped, groups.length, {
+          kind: "skipped",
+          group,
+          reason,
+        });
       } else {
         summarized++;
+        onComplete?.(summarized + skipped, groups.length, {
+          kind: "summarized",
+          group,
+        });
       }
     } catch (err) {
-      errors.push(`${group.date}/${group.projectId}: ${formatSummarizeError(err)}`);
+      const errorMsg = formatSummarizeError(err);
+      errors.push(`${group.date}/${group.projectId}: ${errorMsg}`);
+      onComplete?.(summarized + skipped, groups.length, {
+        kind: "error",
+        group,
+        error: errorMsg,
+      });
     }
   }
 

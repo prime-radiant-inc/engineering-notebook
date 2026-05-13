@@ -73,17 +73,35 @@ switch (command) {
     }
 
     const { summarizeAll } = await import("./summarize");
-    const result = await summarizeAll(db, filterDate, filterProject, (done, total, group) => {
-      console.log(`[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`);
-    }, config.day_start_hour, config);
-
-    console.log(`Summarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`);
-    if (result.skipped > 0) {
-      for (const reason of result.skipReasons) {
-        console.log(`  \u2298 ${reason}`);
+    const result = await summarizeAll(
+      db,
+      filterDate,
+      filterProject,
+      (done, total, group) => {
+        console.log(
+          `[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`
+        );
+      },
+      config.day_start_hour,
+      config,
+      (done, total, outcome) => {
+        const tag = `[${done}/${total}]`;
+        const where = `${outcome.group.projectName} (${outcome.group.date})`;
+        if (outcome.kind === "summarized") {
+          console.log(`${tag} \u2713 ${where}`);
+        } else if (outcome.kind === "skipped") {
+          console.log(`${tag} \u2298 ${where}: ${outcome.reason}`);
+        } else {
+          console.error(`${tag} \u2717 ${where}: ${outcome.error}`);
+        }
       }
-    }
+    );
+
+    console.log(
+      `\nSummarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
+    );
     if (result.errors.length > 0) {
+      console.error("\nErrors:");
       for (const err of result.errors.slice(0, 10)) {
         console.error(`  ${err}`);
       }
