@@ -216,43 +216,42 @@ describe("groupSessionsByDateAndProject - midnight spanning", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  test("splits a midnight-spanning session into two date groups", () => {
+  test("attributes the entire midnight-spanning session to its start date", () => {
+    // After the cross-midnight fix: sessions are atomic units attributed
+    // to their started_at logical date. The session begun at 22:00 on
+    // Feb 20 is wholly attributed to Feb 20, including the morning
+    // messages at 06:00/06:05 on Feb 21.
     const groups = groupSessionsByDateAndProject(db);
-    expect(groups.length).toBe(2);
-
-    const sorted = groups.sort((a, b) => a.date.localeCompare(b.date));
-
-    // Feb 20: messages at 22:00, 22:10, 01:30, 01:35 (all logical date Feb 20)
-    expect(sorted[0]!.date).toBe("2026-02-20");
-    expect(sorted[0]!.projectId).toBe("myapp");
-    expect(sorted[0]!.sessionIds).toEqual(["s-midnight"]);
-    expect(sorted[0]!.conversations[0]).toContain("Late night refactor");
-    expect(sorted[0]!.conversations[0]).toContain("Still at it");
-
-    // Feb 21: messages at 06:00, 06:05 (logical date Feb 21)
-    expect(sorted[1]!.date).toBe("2026-02-21");
-    expect(sorted[1]!.projectId).toBe("myapp");
-    expect(sorted[1]!.sessionIds).toEqual(["s-midnight"]);
-    expect(sorted[1]!.conversations[0]).toContain("Morning review");
+    expect(groups.length).toBe(1);
+    expect(groups[0]!.date).toBe("2026-02-20");
+    expect(groups[0]!.sessionIds).toEqual(["s-midnight"]);
+    // The full conversation (all 6 messages) should be present.
+    expect(groups[0]!.conversations[0]).toContain("Late night refactor");
+    expect(groups[0]!.conversations[0]).toContain("Still at it");
+    expect(groups[0]!.conversations[0]).toContain("Morning review");
   });
 
   test("filters out already-summarized date+project combos", () => {
-    // Insert a journal entry for Feb 20
+    // Insert a journal entry for Feb 20 (the session's start date)
     db.exec(`
       INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, generated_at, model_used)
       VALUES ('2026-02-20', 'myapp', '["s-midnight"]', 'Test', 'Test summary', '[]', datetime('now'), 'test-model');
     `);
 
     const groups = groupSessionsByDateAndProject(db);
-    // Only Feb 21 should remain
-    expect(groups.length).toBe(1);
-    expect(groups[0]!.date).toBe("2026-02-21");
+    // Now nothing remains — the whole session was attributed to Feb 20
+    // which is summarized.
+    expect(groups.length).toBe(0);
   });
 
-  test("filterDate works with logical dates", () => {
-    const groups = groupSessionsByDateAndProject(db, "2026-02-21");
-    expect(groups.length).toBe(1);
-    expect(groups[0]!.date).toBe("2026-02-21");
-    expect(groups[0]!.conversations[0]).toContain("Morning review");
+  test("filterDate matches start date", () => {
+    // Asking for Feb 21 should NOT return the session that started on Feb 20
+    // even though some of its messages are timestamped Feb 21.
+    const groupsFeb21 = groupSessionsByDateAndProject(db, "2026-02-21");
+    expect(groupsFeb21.length).toBe(0);
+
+    const groupsFeb20 = groupSessionsByDateAndProject(db, "2026-02-20");
+    expect(groupsFeb20.length).toBe(1);
+    expect(groupsFeb20[0]!.conversations[0]).toContain("Morning review");
   });
 });

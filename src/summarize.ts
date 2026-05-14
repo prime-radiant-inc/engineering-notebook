@@ -125,8 +125,18 @@ export function splitConversationByDay(
 }
 
 /** Group unsummarized sessions by date and project.
- *  Splits conversations by logical day boundary so a session spanning midnight
- *  contributes messages to the correct date's journal entry. */
+ *
+ *  Each session is treated as an atomic unit and attributed to its
+ *  `started_at` logical date. A session that begins late one night and
+ *  continues past midnight contributes its full content to the start date,
+ *  not split across days.
+ *
+ *  Earlier versions split sessions at midnight using per-message timestamps,
+ *  but in practice that produced thin tail slivers on the next day (a few
+ *  morning messages) that the LLM consistently rejected as "no engineering
+ *  work" — losing the connection to the substantive work that came earlier.
+ *  Keeping sessions whole gives the journal entry for the start date access
+ *  to the entire arc. */
 export function groupSessionsByDateAndProject(
   db: Database,
   filterDate?: string,
@@ -171,56 +181,31 @@ export function groupSessionsByDateAndProject(
     summarizedRows.map((r) => `${r.date}|${r.project_id}`)
   );
 
-  // Group by (logical-date, project)
+  // Group by (logical-start-date, project). Each session is attributed
+  // atomically to its started_at logical date — we no longer split a
+  // session's content across days even if its messages span midnight.
+  // The session's started_at column is what `row.date` already holds (it's
+  // `date(s.started_at)` from the SELECT), so we only need to apply the
+  // dayStartHour cutoff for late-night starts.
   const groups = new Map<string, SessionGroup>();
 
   for (const row of rows) {
-    const dayChunks = splitConversationByDay(
-      row.conversation_markdown,
-      dayStartHour
-    );
-
-    if (dayChunks) {
-      // New-format timestamps: split across logical dates
-      for (const [day, chunk] of dayChunks) {
-        const key = `${day}|${row.project_id}`;
-        if (!groups.has(key)) {
-          groups.set(key, {
-            date: day,
-            projectId: row.project_id,
-            projectName: row.display_name,
-            sessionIds: [],
-            conversations: [],
-          });
-        }
-        const group = groups.get(key)!;
-        if (!group.sessionIds.includes(row.session_id)) {
-          group.sessionIds.push(row.session_id);
-        }
-        group.conversations.push(chunk);
-      }
-    } else {
-      // Old-format timestamps: fall back to session's started_at date
-      const fallbackDay = logicalDate(
-        row.date + " 12:00",
-        dayStartHour
-      );
-      const key = `${fallbackDay}|${row.project_id}`;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          date: fallbackDay,
-          projectId: row.project_id,
-          projectName: row.display_name,
-          sessionIds: [],
-          conversations: [],
-        });
-      }
-      const group = groups.get(key)!;
-      if (!group.sessionIds.includes(row.session_id)) {
-        group.sessionIds.push(row.session_id);
-      }
-      group.conversations.push(row.conversation_markdown);
+    const sessionDate = logicalDate(row.date + " 12:00", dayStartHour);
+    const key = `${sessionDate}|${row.project_id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        date: sessionDate,
+        projectId: row.project_id,
+        projectName: row.display_name,
+        sessionIds: [],
+        conversations: [],
+      });
     }
+    const group = groups.get(key)!;
+    if (!group.sessionIds.includes(row.session_id)) {
+      group.sessionIds.push(row.session_id);
+    }
+    group.conversations.push(row.conversation_markdown);
   }
 
   // Filter out already-summarized combos
