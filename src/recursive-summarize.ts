@@ -251,19 +251,100 @@ async function callLlm(
   if (!rawContent.trim()) {
     throw new Error("Empty content from LLM");
   }
-  // Some providers wrap output in markdown fences even when asked for JSON.
-  // Strip a leading ```json / ``` and trailing ``` if present.
-  const cleaned = rawContent
+  const parsed = parseLlmJsonResponse(rawContent);
+  if (parsed === null) {
+    throw new Error(`Non-JSON content: ${rawContent.slice(0, 200)}`);
+  }
+  return { parsed, stats };
+}
+
+/** Extract a JSON object from an LLM response that may contain extraneous
+ *  framing. Recovery strategies, in order of preference:
+ *
+ *  1. Direct parse (the happy path).
+ *  2. Strip markdown code fences (```json ... ```).
+ *  3. Strip <think>...</think> blocks (some providers leak reasoning into
+ *     content even when thinking should be off).
+ *  4. Find the first balanced {...} substring and parse that. Handles
+ *     responses with prose preamble or trailing commentary.
+ *
+ *  Returns the parsed object or null if no recovery succeeds. */
+export function parseLlmJsonResponse(
+  raw: string
+): Record<string, unknown> | null {
+  const candidates: string[] = [];
+
+  // Strategy 1: try the raw content directly.
+  candidates.push(raw.trim());
+
+  // Strategy 2: strip ``` fences.
+  const fenced = raw
     .trim()
     .replace(/^```(?:json)?\s*/, "")
     .replace(/\s*```$/, "");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new Error(`Non-JSON content: ${rawContent.slice(0, 200)}`);
+  if (fenced !== raw.trim()) candidates.push(fenced);
+
+  // Strategy 3: strip <think>...</think> blocks (greedy + non-greedy).
+  // Some providers (notably Ollama with certain models) emit thinking
+  // tokens inline in content even when think:false is set.
+  const dethought = raw
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/<\/think>/g, "")
+    .trim();
+  if (dethought !== raw.trim()) candidates.push(dethought);
+
+  // Strategy 4: find the first balanced JSON object substring.
+  // Scans for the first `{` and tracks brace depth (respecting strings)
+  // until it reaches matching depth 0. This recovers from prose preamble
+  // and trailing text.
+  const balanced = extractFirstBalancedObject(raw);
+  if (balanced !== null) candidates.push(balanced);
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const obj = JSON.parse(candidate);
+      if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+        return obj as Record<string, unknown>;
+      }
+    } catch {
+      // try next candidate
+    }
   }
-  return { parsed: parsed as Record<string, unknown>, stats };
+  return null;
+}
+
+/** Find the first balanced `{...}` JSON object substring in text. Returns
+ *  the substring (including braces) or null if none found. Respects string
+ *  literals (escaped quotes inside strings don't affect depth). */
+export function extractFirstBalancedObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
 }
 
 function makeCoherenceToken(): string {

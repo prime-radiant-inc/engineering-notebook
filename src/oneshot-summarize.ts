@@ -30,6 +30,7 @@ import {
   type ResolvedSummarizerSettings,
   type SummaryResult,
 } from "./summarize";
+import { parseLlmJsonResponse } from "./recursive-summarize";
 
 type SummarizerConfig = Pick<
   Config,
@@ -232,14 +233,11 @@ async function callOneShot(
  *  doesn't enforce schema requiredness). Returns null if the response can't
  *  be parsed at all. */
 function parseOneShotResponse(raw: string): SummaryResult | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") return null;
-  const obj = parsed as Record<string, unknown>;
+  // Use the recursive summarizer's response parser for consistent recovery
+  // across providers (handles ``` fences, <think>...</think> leaks, and
+  // prose preamble around the JSON object).
+  const obj = parseLlmJsonResponse(raw);
+  if (!obj) return null;
 
   const skipped = obj.skipped === true;
   if (skipped) {
