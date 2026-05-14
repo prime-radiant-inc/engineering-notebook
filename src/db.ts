@@ -61,9 +61,24 @@ export function initDb(dbPath: string): Database {
       UNIQUE(date, project_id)
     );
 
+    CREATE TABLE IF NOT EXISTS journal_invocations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      parent_id INTEGER REFERENCES journal_invocations(id) ON DELETE CASCADE,
+      journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+      scope_start INTEGER NOT NULL,
+      scope_end INTEGER NOT NULL,
+      depth INTEGER NOT NULL,
+      coherence_token TEXT NOT NULL,
+      question TEXT NOT NULL,
+      actions TEXT NOT NULL DEFAULT '[]',
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS journal_fragments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+      invocation_id INTEGER REFERENCES journal_invocations(id) ON DELETE CASCADE,
       chunk_index INTEGER NOT NULL,
       session_id TEXT NOT NULL REFERENCES sessions(id),
       char_start INTEGER NOT NULL,
@@ -99,6 +114,9 @@ export function initDb(dbPath: string): Database {
     CREATE INDEX IF NOT EXISTS idx_rollups_project ON journal_rollups(project_id);
     CREATE INDEX IF NOT EXISTS idx_fragments_entry ON journal_fragments(journal_entry_id);
     CREATE INDEX IF NOT EXISTS idx_fragments_session ON journal_fragments(session_id);
+    CREATE INDEX IF NOT EXISTS idx_fragments_invocation ON journal_fragments(invocation_id);
+    CREATE INDEX IF NOT EXISTS idx_invocations_entry ON journal_invocations(journal_entry_id);
+    CREATE INDEX IF NOT EXISTS idx_invocations_parent ON journal_invocations(parent_id);
   `);
 
   // Migrations
@@ -121,6 +139,62 @@ export function initDb(dbPath: string): Database {
     db.exec(`ALTER TABLE sessions ADD COLUMN source_mtime TEXT`);
   } catch {
     // Column already exists — ignore
+  }
+  // Migrate journal_fragments to add invocation_id with proper FK + cascade.
+  //
+  // SQLite forbids `ALTER TABLE ADD COLUMN ... REFERENCES`, so the
+  // canonical fix is the table-rebuild dance: create the new shape, copy
+  // data, drop the old, rename. Detect whether migration is needed by
+  // checking whether the existing column has the FK; if not, rebuild.
+  const fragmentSchema = db
+    .query<{ sql: string }, []>(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'journal_fragments'`
+    )
+    .get();
+  const fragmentColumns = db
+    .query<{ name: string }, []>(`PRAGMA table_info(journal_fragments)`)
+    .all()
+    .map((r) => r.name);
+  const hasInvocationId = fragmentColumns.includes("invocation_id");
+  const fkDeclared =
+    fragmentSchema?.sql?.includes("invocation_id INTEGER REFERENCES") ?? false;
+  if (!hasInvocationId || !fkDeclared) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE journal_fragments_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+          invocation_id INTEGER REFERENCES journal_invocations(id) ON DELETE CASCADE,
+          chunk_index INTEGER NOT NULL,
+          session_id TEXT NOT NULL REFERENCES sessions(id),
+          char_start INTEGER NOT NULL,
+          char_end INTEGER NOT NULL,
+          span_checksum TEXT NOT NULL,
+          category TEXT NOT NULL,
+          text TEXT NOT NULL,
+          extracted_at TEXT NOT NULL
+        );
+      `);
+      // Copy data, defaulting invocation_id to NULL for any pre-existing rows
+      // (those came from the long-since-deleted chunked-summarize path and
+      // had no recorded invocation).
+      const cols = hasInvocationId
+        ? "id, journal_entry_id, invocation_id, chunk_index, session_id, char_start, char_end, span_checksum, category, text, extracted_at"
+        : "id, journal_entry_id, NULL, chunk_index, session_id, char_start, char_end, span_checksum, category, text, extracted_at";
+      db.exec(`
+        INSERT INTO journal_fragments_new
+          (id, journal_entry_id, invocation_id, chunk_index, session_id,
+           char_start, char_end, span_checksum, category, text, extracted_at)
+        SELECT ${cols} FROM journal_fragments;
+
+        DROP TABLE journal_fragments;
+        ALTER TABLE journal_fragments_new RENAME TO journal_fragments;
+
+        CREATE INDEX idx_fragments_entry ON journal_fragments(journal_entry_id);
+        CREATE INDEX idx_fragments_session ON journal_fragments(session_id);
+        CREATE INDEX idx_fragments_invocation ON journal_fragments(invocation_id);
+      `);
+    })();
   }
 
   _db = db;

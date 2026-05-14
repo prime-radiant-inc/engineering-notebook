@@ -75,11 +75,51 @@ switch (command) {
         closeDb();
         process.exit(1);
       }
+
+      // First: try to load and render a previously-recorded recursion tree
+      // for this entry. If a recursive run produced this summary, we have
+      // its full action trace and fragments stored in the DB.
+      const entryRow = db
+        .query<{ id: number; headline: string; summary: string; topics: string; open_questions: string; model_used: string }, [string, string]>(
+          "SELECT id, headline, summary, topics, open_questions, model_used FROM journal_entries WHERE date = ? AND project_id = ?"
+        )
+        .get(filterDate, filterProject);
+      if (entryRow) {
+        const { loadInvocationTree, renderInvocationTree } = await import(
+          "./recursive-summarize"
+        );
+        const tree = loadInvocationTree(db, entryRow.id);
+        if (tree) {
+          const rule = "-".repeat(60);
+          console.log(`# Audit: ${filterProject} (${filterDate})`);
+          console.log(`# Source: stored recursion tree`);
+          console.log(`# Model: ${entryRow.model_used}\n`);
+          console.log(`## Recursion tree\n${rule}`);
+          console.log(renderInvocationTree(tree));
+          console.log(rule);
+          console.log(`\n## Final journal entry`);
+          if (entryRow.headline === "") {
+            console.log(`SKIPPED: ${entryRow.summary}`);
+          } else {
+            console.log(`HEADLINE: ${entryRow.headline}`);
+            console.log(`SUMMARY: ${entryRow.summary}`);
+            console.log(`TOPICS: ${entryRow.topics}`);
+            console.log(`OPEN_QUESTIONS: ${entryRow.open_questions}`);
+          }
+          closeDb();
+          break;
+        }
+        // Entry exists but no tree (e.g. one-shot path or older runs).
+        // Fall through to the live re-run path below.
+      }
+
+      // Fallback: live re-run via explainGroup. Only works on unsummarized
+      // groups (or after deleting the stored entry).
       const { groupSessionsByDateAndProject, explainGroup } = await import("./summarize");
       const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, config.day_start_hour);
       if (groups.length === 0) {
         console.error(`No unsummarized group found for date=${filterDate} project=${filterProject}.`);
-        console.error("Note: --why operates on unsummarized groups. To re-audit a summarized one, delete its journal_entries row first.");
+        console.error("Note: live --why operates on unsummarized groups. The stored entry exists but has no recorded recursion tree (likely produced by the one-shot path). To re-audit, delete its journal_entries row first.");
         closeDb();
         process.exit(1);
       }
@@ -87,6 +127,7 @@ switch (command) {
       const explained = await explainGroup(target, config);
       const rule = "-".repeat(60);
       console.log(`# Audit: ${target.projectName} (${target.date})`);
+      console.log(`# Source: live re-run via explainGroup`);
       console.log(`# Sessions: ${target.sessionIds.length}, conversation chunks: ${target.conversations.length}`);
       console.log(`# Model: ${explained.modelUsed}\n`);
       if (explained.requestBody) {

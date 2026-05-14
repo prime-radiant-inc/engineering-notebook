@@ -352,6 +352,15 @@ function makeCoherenceToken(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** SHA-1 hex of a string. Used as a stable checksum for fragment spans
+ *  so we can detect when the underlying transcript has been re-ingested
+ *  with different content at the same offsets. */
+function sha1(text: string): string {
+  const hasher = new Bun.CryptoHasher("sha1");
+  hasher.update(text);
+  return hasher.digest("hex");
+}
+
 // ─────────────────────────────────────────────────────────────
 // Recursive invocation
 // ─────────────────────────────────────────────────────────────
@@ -364,6 +373,62 @@ export type RecursiveResult = {
   scope: Scope;
   /** Total invocations (including children). */
   totalInvocations: number;
+  /** Root of the recursion tree, for persistence and audit. */
+  rootInvocation: InvocationNode;
+};
+
+/** Recorded action from a recursive invocation. Compact form for JSON
+ *  serialization in journal_invocations.actions. result_preview is
+ *  truncated to keep DB rows manageable. */
+export type RecordedAction = {
+  step: number;
+  action:
+    | "auto_read"
+    | "search"
+    | "read_range"
+    | "spawn"
+    | "done"
+    | "done-rejected"
+    | "plan-failed"
+    | "extract-failed";
+  detail: string;
+  result_preview: string;
+  /** When action="spawn", the index of the child invocation in this
+   *  invocation's children list. */
+  spawned_child_index?: number;
+};
+
+/** A recorded invocation node. The tree of these mirrors the recursion
+ *  structure. Only used in-memory; persisted by the caller. */
+export type InvocationNode = {
+  scope: Scope;
+  depth: number;
+  question: string;
+  coherenceToken: string;
+  startedAt: string;
+  endedAt: string;
+  actions: RecordedAction[];
+  /** Extracted journal-fragment items from this invocation's reads.
+   *  For now, a leaf invocation produces a single fragment representing
+   *  its full read; richer per-item extraction can be added later. */
+  fragments: RecordedFragment[];
+  children: InvocationNode[];
+  /** Whatever this invocation produced (skip or extract). */
+  result: SummaryResult;
+};
+
+export type RecordedFragment = {
+  /** Char offsets in the source transcript (absolute). */
+  charStart: number;
+  charEnd: number;
+  /** Which session this span comes from. May be empty if the span
+   *  crosses multiple sessions (currently unused — fragments correspond
+   *  to leaf reads which sit within a single session boundary). */
+  sessionId: string;
+  /** Stable hash of the source bytes at extraction time. */
+  spanChecksum: string;
+  category: string;
+  text: string;
 };
 
 type ObservationEntry = {
@@ -495,11 +560,29 @@ function parseExtractResponse(parsed: Record<string, unknown>): SummaryResult {
   };
 }
 
+/** Lookup table from char offset to source session ID. Built once per
+ *  recursive run from the per-conversation source attribution. Used so
+ *  leaf invocations can record which session their span came from. */
+export type SessionRange = {
+  sessionId: string;
+  start: number;
+  end: number;
+};
+
+/** Find which session a given absolute char offset falls within. */
+function sessionAt(ranges: SessionRange[], offset: number): string {
+  for (const r of ranges) {
+    if (offset >= r.start && offset < r.end) return r.sessionId;
+  }
+  return "";
+}
+
 /** Internal recursive driver. Returns when this invocation has produced an
  *  extract or hit an error. Maintains a shared invocation counter via the
  *  `state` object so the global cap is honored across the tree. */
 async function invokeRecursive(
   transcript: string,
+  sessionRanges: SessionRange[],
   projectName: string,
   date: string,
   scope: Scope,
@@ -513,14 +596,19 @@ async function invokeRecursive(
   result: SummaryResult;
   coveredSpans: Span[];
   modelUsed: string;
+  node: InvocationNode;
 }> {
   state.totalInvocations++;
   const settings = resolveSummarizerSettings(config);
   const indent = "  ".repeat(depth);
   const coherenceToken = makeCoherenceToken();
   const observations: ObservationEntry[] = [];
+  const recordedActions: RecordedAction[] = [];
+  const recordedFragments: RecordedFragment[] = [];
+  const childNodes: InvocationNode[] = [];
   const coveredSpans: Span[] = [];
   const scopeLen = scopedLength(scope);
+  const startedAt = new Date().toISOString();
 
   onProgress?.(
     `${indent}#${state.totalInvocations} d=${depth} scope=${scope.label} (${scopeLen}c) token=${coherenceToken}`
@@ -535,6 +623,21 @@ async function invokeRecursive(
       action: "auto_read",
       detail: `0, ${scopeLen}`,
       result: text,
+    });
+    recordedActions.push({
+      step: 0,
+      action: "auto_read",
+      detail: `0, ${scopeLen}`,
+      result_preview: text.slice(0, 200).replace(/\n/g, " ⏎ "),
+    });
+    // The leaf's read becomes a fragment in the source-attributed table.
+    recordedFragments.push({
+      charStart: scope.globalStart,
+      charEnd: scope.globalEnd,
+      sessionId: sessionAt(sessionRanges, scope.globalStart),
+      spanChecksum: sha1(text),
+      category: "leaf_read",
+      text: text.slice(0, 500), // truncated for storage; full source available via offsets
     });
     onProgress?.(`${indent}  leaf: auto-read ${scopeLen}c`);
   } else {
@@ -563,6 +666,12 @@ async function invokeRecursive(
         plan = r.parsed;
       } catch (err) {
         onProgress?.(`${indent}  plan failed (${err}); forcing extract`);
+        recordedActions.push({
+          step,
+          action: "plan-failed",
+          detail: "",
+          result_preview: String(err).slice(0, 200),
+        });
         break;
       }
       const action = String(plan.action);
@@ -588,9 +697,21 @@ async function invokeRecursive(
             detail: "",
             result: issues.join("; "),
           });
+          recordedActions.push({
+            step,
+            action: "done-rejected",
+            detail: "",
+            result_preview: issues.join("; ").slice(0, 200),
+          });
           continue;
         }
         onProgress?.(`${indent}    done accepted`);
+        recordedActions.push({
+          step,
+          action: "done",
+          detail: "",
+          result_preview: `coverage=${covered}/${scopeLen}`,
+        });
         break;
       }
 
@@ -612,6 +733,12 @@ async function invokeRecursive(
           detail: JSON.stringify(query),
           result,
         });
+        recordedActions.push({
+          step,
+          action: "search",
+          detail: query,
+          result_preview: `${hits.length} hits`,
+        });
         continue;
       }
 
@@ -628,6 +755,12 @@ async function invokeRecursive(
             detail: `${start}, ${end}`,
             result: "(empty)",
           });
+          recordedActions.push({
+            step,
+            action: "read_range",
+            detail: `${start}, ${end}`,
+            result_preview: "(empty)",
+          });
           continue;
         }
         const text = tool_read_range(transcript, scope, start, end);
@@ -639,6 +772,24 @@ async function invokeRecursive(
           detail: `${start}, ${actualEnd}`,
           result: text,
         });
+        recordedActions.push({
+          step,
+          action: "read_range",
+          detail: `${start}, ${actualEnd}`,
+          result_preview: text.slice(0, 200).replace(/\n/g, " ⏎ "),
+        });
+        // Each non-spawn read of substantive content becomes a fragment too,
+        // so --why can map any extracted topic back to a specific span.
+        const absStart = scope.globalStart + start;
+        const absEnd = scope.globalStart + actualEnd;
+        recordedFragments.push({
+          charStart: absStart,
+          charEnd: absEnd,
+          sessionId: sessionAt(sessionRanges, absStart),
+          spanChecksum: sha1(text),
+          category: "read",
+          text: text.slice(0, 500),
+        });
         continue;
       }
 
@@ -649,6 +800,12 @@ async function invokeRecursive(
             action: "spawn",
             detail: "",
             result: "(rejected: spawn forbidden at leaf scope)",
+          });
+          recordedActions.push({
+            step,
+            action: "spawn",
+            detail: "",
+            result_preview: "rejected: spawn forbidden at leaf scope",
           });
           continue;
         }
@@ -663,6 +820,12 @@ async function invokeRecursive(
             detail: `${subStart}, ${subEnd}`,
             result: `(rejected: ${validation})`,
           });
+          recordedActions.push({
+            step,
+            action: "spawn",
+            detail: `${subStart}, ${subEnd}`,
+            result_preview: `rejected: ${validation}`,
+          });
           continue;
         }
         const childScope: Scope = {
@@ -673,6 +836,7 @@ async function invokeRecursive(
         coveredSpans.push([subStart, subEnd]);
         const child = await invokeRecursive(
           transcript,
+          sessionRanges,
           projectName,
           date,
           childScope,
@@ -683,6 +847,8 @@ async function invokeRecursive(
           summaryInstructions,
           onProgress
         );
+        const childIndex = childNodes.length;
+        childNodes.push(child.node);
         const result = child.result.skipped
           ? `(child skipped: ${child.result.skipReason})`
           : `HEADLINE: ${child.result.headline}\nSUMMARY: ${child.result.summary}\nTOPICS: ${JSON.stringify(child.result.topics)}\nOPEN_QUESTIONS: ${JSON.stringify(child.result.openQuestions)}`;
@@ -692,10 +858,25 @@ async function invokeRecursive(
           detail: `${subStart}-${subEnd}`,
           result,
         });
+        recordedActions.push({
+          step,
+          action: "spawn",
+          detail: `${subStart}, ${subEnd}`,
+          result_preview: child.result.skipped
+            ? `child skipped: ${child.result.skipReason?.slice(0, 100)}`
+            : `child summarized: ${child.result.headline.slice(0, 100)}`,
+          spawned_child_index: childIndex,
+        });
         continue;
       }
 
       onProgress?.(`${indent}    unknown action ${action}; forcing extract`);
+      recordedActions.push({
+        step,
+        action: "plan-failed",
+        detail: action,
+        result_preview: "unknown action",
+      });
       break;
     }
   }
@@ -710,25 +891,45 @@ async function invokeRecursive(
     summaryInstructions
   );
   let extracted: Record<string, unknown>;
+  let result: SummaryResult;
   try {
     const r = await callLlm(extractPrompt, EXTRACT_SCHEMA, settings);
     extracted = r.parsed;
     onProgress?.(`${indent}  extract done`);
+    result = parseExtractResponse(extracted);
   } catch (err) {
-    return {
-      result: {
-        skipped: true,
-        skipReason: `extract_error: ${err instanceof Error ? err.message : String(err)}`,
-      },
-      coveredSpans,
-      modelUsed: settings.model,
+    const msg = err instanceof Error ? err.message : String(err);
+    recordedActions.push({
+      step: recordedActions.length,
+      action: "extract-failed",
+      detail: "",
+      result_preview: msg.slice(0, 200),
+    });
+    result = {
+      skipped: true,
+      skipReason: `extract_error: ${msg}`,
     };
   }
 
+  const endedAt = new Date().toISOString();
+  const node: InvocationNode = {
+    scope,
+    depth,
+    question,
+    coherenceToken,
+    startedAt,
+    endedAt,
+    actions: recordedActions,
+    fragments: recordedFragments,
+    children: childNodes,
+    result,
+  };
+
   return {
-    result: parseExtractResponse(extracted),
+    result,
     coveredSpans,
     modelUsed: settings.model,
+    node,
   };
 }
 
@@ -747,6 +948,11 @@ export async function summarizeRecursive(
     maxInvocations?: number;
     /** Per-step progress callback for visibility into the recursion. */
     onProgress?: (msg: string) => void;
+    /** Source-session attribution: where each session's content sits in
+     *  the concatenated transcript. Used so leaf invocations can record
+     *  the session_id their span came from. If omitted, fragments will
+     *  carry an empty session_id. */
+    sessionRanges?: SessionRange[];
   }
 ): Promise<RecursiveResult> {
   const summaryInstructions = config?.summary_instructions;
@@ -765,8 +971,10 @@ export async function summarizeRecursive(
     totalInvocations: 0,
     maxInvocations: options?.maxInvocations ?? defaultBudget,
   };
-  const { result, coveredSpans, modelUsed } = await invokeRecursive(
+  const sessionRanges = options?.sessionRanges ?? [];
+  const { result, coveredSpans, modelUsed, node } = await invokeRecursive(
     transcript,
+    sessionRanges,
     projectName,
     date,
     rootScope,
@@ -781,7 +989,240 @@ export async function summarizeRecursive(
     parsed: result,
     modelUsed,
     coveredSpans,
+    rootInvocation: node,
     scope: rootScope,
     totalInvocations: state.totalInvocations,
   };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Persistence: write/read the recursion tree
+// ─────────────────────────────────────────────────────────────
+
+import type { Database } from "bun:sqlite";
+
+/** Persist a complete recursion tree under a journal entry. Idempotent:
+ *  deletes any existing invocations for this entry first (cascade also
+ *  drops their fragments). */
+export function persistInvocationTree(
+  db: Database,
+  journalEntryId: number,
+  root: InvocationNode
+): void {
+  // CASCADE on parent_id and journal_entry_id handles existing rows.
+  db.prepare(
+    `DELETE FROM journal_invocations WHERE journal_entry_id = ?`
+  ).run(journalEntryId);
+
+  const insertInvocation = db.prepare(`
+    INSERT INTO journal_invocations
+      (parent_id, journal_entry_id, scope_start, scope_end, depth,
+       coherence_token, question, actions, started_at, ended_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertFragment = db.prepare(`
+    INSERT INTO journal_fragments
+      (journal_entry_id, invocation_id, chunk_index, session_id,
+       char_start, char_end, span_checksum, category, text, extracted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `);
+
+  function persistNode(node: InvocationNode, parentId: number | null): void {
+    const result = insertInvocation.run(
+      parentId,
+      journalEntryId,
+      node.scope.globalStart,
+      node.scope.globalEnd,
+      node.depth,
+      node.coherenceToken,
+      node.question,
+      JSON.stringify(node.actions),
+      node.startedAt,
+      node.endedAt
+    );
+    const invocationId = Number(result.lastInsertRowid);
+
+    for (const [index, frag] of node.fragments.entries()) {
+      insertFragment.run(
+        journalEntryId,
+        invocationId,
+        index,
+        frag.sessionId,
+        frag.charStart,
+        frag.charEnd,
+        frag.spanChecksum,
+        frag.category,
+        frag.text
+      );
+    }
+
+    for (const child of node.children) {
+      persistNode(child, invocationId);
+    }
+  }
+
+  db.transaction(() => persistNode(root, null))();
+}
+
+type InvocationRow = {
+  id: number;
+  parent_id: number | null;
+  scope_start: number;
+  scope_end: number;
+  depth: number;
+  coherence_token: string;
+  question: string;
+  actions: string;
+  started_at: string;
+  ended_at: string | null;
+};
+
+type FragmentRow = {
+  invocation_id: number | null;
+  char_start: number;
+  char_end: number;
+  span_checksum: string;
+  category: string;
+  text: string;
+};
+
+export type LoadedInvocationTree = {
+  root: LoadedInvocationNode;
+};
+
+export type LoadedInvocationNode = {
+  id: number;
+  parentId: number | null;
+  scopeStart: number;
+  scopeEnd: number;
+  depth: number;
+  coherenceToken: string;
+  question: string;
+  actions: RecordedAction[];
+  fragments: RecordedFragment[];
+  startedAt: string;
+  endedAt: string | null;
+  children: LoadedInvocationNode[];
+};
+
+/** Reload a recursion tree previously written by persistInvocationTree.
+ *  Returns null if no invocations exist for the journal entry. */
+export function loadInvocationTree(
+  db: Database,
+  journalEntryId: number
+): LoadedInvocationTree | null {
+  const invocations = db
+    .query<InvocationRow, [number]>(
+      `SELECT id, parent_id, scope_start, scope_end, depth, coherence_token,
+              question, actions, started_at, ended_at
+       FROM journal_invocations
+       WHERE journal_entry_id = ?
+       ORDER BY id`
+    )
+    .all(journalEntryId);
+  if (invocations.length === 0) return null;
+
+  const fragments = db
+    .query<FragmentRow, [number]>(
+      `SELECT invocation_id, char_start, char_end, span_checksum, category, text
+       FROM journal_fragments
+       WHERE journal_entry_id = ?`
+    )
+    .all(journalEntryId);
+
+  const fragmentsByInvocation = new Map<number, RecordedFragment[]>();
+  for (const f of fragments) {
+    if (f.invocation_id === null) continue;
+    const list = fragmentsByInvocation.get(f.invocation_id) ?? [];
+    list.push({
+      charStart: f.char_start,
+      charEnd: f.char_end,
+      sessionId: "", // not stored on fragment row in this loader; would need join
+      spanChecksum: f.span_checksum,
+      category: f.category,
+      text: f.text,
+    });
+    fragmentsByInvocation.set(f.invocation_id, list);
+  }
+
+  const nodesById = new Map<number, LoadedInvocationNode>();
+  let root: LoadedInvocationNode | null = null;
+  for (const inv of invocations) {
+    let actions: RecordedAction[] = [];
+    try {
+      actions = JSON.parse(inv.actions) as RecordedAction[];
+    } catch {
+      // ignore malformed JSON
+    }
+    const node: LoadedInvocationNode = {
+      id: inv.id,
+      parentId: inv.parent_id,
+      scopeStart: inv.scope_start,
+      scopeEnd: inv.scope_end,
+      depth: inv.depth,
+      coherenceToken: inv.coherence_token,
+      question: inv.question,
+      actions,
+      fragments: fragmentsByInvocation.get(inv.id) ?? [],
+      startedAt: inv.started_at,
+      endedAt: inv.ended_at,
+      children: [],
+    };
+    nodesById.set(inv.id, node);
+    if (inv.parent_id === null) root = node;
+  }
+  for (const inv of invocations) {
+    if (inv.parent_id !== null) {
+      const parent = nodesById.get(inv.parent_id);
+      const child = nodesById.get(inv.id);
+      if (parent && child) parent.children.push(child);
+    }
+  }
+
+  return root ? { root } : null;
+}
+
+/** Render an invocation tree as a human-readable string for --why output.
+ *  Indentation tracks recursion depth. Each invocation shows its scope,
+ *  question, action timeline, and result. */
+export function renderInvocationTree(tree: LoadedInvocationTree): string {
+  const lines: string[] = [];
+  function render(node: LoadedInvocationNode): void {
+    const indent = "  ".repeat(node.depth);
+    const scopeLen = node.scopeEnd - node.scopeStart;
+    lines.push(
+      `${indent}── invocation #${node.id} d=${node.depth} scope=[${node.scopeStart},${node.scopeEnd}) (${scopeLen}c) token=${node.coherenceToken}`
+    );
+    lines.push(`${indent}   question: ${node.question}`);
+    if (node.actions.length === 0) {
+      lines.push(`${indent}   (no recorded actions)`);
+    } else {
+      for (const a of node.actions) {
+        const detail = a.detail ? ` ${a.detail}` : "";
+        const preview = a.result_preview ? ` → ${a.result_preview}` : "";
+        const childRef =
+          a.spawned_child_index !== undefined
+            ? ` [child #${a.spawned_child_index}]`
+            : "";
+        lines.push(
+          `${indent}   step ${a.step}: ${a.action}${detail}${preview}${childRef}`
+        );
+      }
+    }
+    if (node.fragments.length > 0) {
+      lines.push(`${indent}   fragments: ${node.fragments.length}`);
+      for (const f of node.fragments.slice(0, 5)) {
+        lines.push(
+          `${indent}     [${f.charStart},${f.charEnd}) ${f.category}: ${JSON.stringify(f.text.slice(0, 80))}`
+        );
+      }
+      if (node.fragments.length > 5) {
+        lines.push(`${indent}     ... and ${node.fragments.length - 5} more`);
+      }
+    }
+    for (const child of node.children) render(child);
+  }
+  render(tree.root);
+  return lines.join("\n");
+}
+

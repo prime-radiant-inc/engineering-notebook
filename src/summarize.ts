@@ -571,7 +571,21 @@ export async function summarizeGroup(
 
   // Above-threshold: recursive RLM-style orchestrator. Provider-agnostic;
   // uses the same provider routing internally (claude or openai-compat).
-  const { summarizeRecursive } = await import("./recursive-summarize");
+  // Build sessionRanges so the orchestrator can attribute each fragment
+  // back to its source session in journal_fragments.
+  const sessionRanges: Array<{ sessionId: string; start: number; end: number }> = [];
+  let cursor = 0;
+  const separator = "\n\n---\n\n";
+  for (let i = 0; i < group.conversations.length; i++) {
+    const md = group.conversations[i]!;
+    const sid = group.conversationSources[i]!;
+    sessionRanges.push({ sessionId: sid, start: cursor, end: cursor + md.length });
+    cursor += md.length + (i < group.conversations.length - 1 ? separator.length : 0);
+  }
+
+  const { summarizeRecursive, persistInvocationTree } = await import(
+    "./recursive-summarize"
+  );
   const recursive = await summarizeRecursive(
     group.projectName,
     group.date,
@@ -579,9 +593,21 @@ export async function summarizeGroup(
     config,
     {
       onProgress: (msg) => console.log(msg),
+      sessionRanges,
     }
   );
   upsertJournalEntry(db, group, recursive.parsed, recursive.modelUsed);
+
+  // Persist the recursion tree so --why can render it later.
+  const entryRow = db
+    .query<{ id: number }, [string, string]>(
+      "SELECT id FROM journal_entries WHERE date = ? AND project_id = ?"
+    )
+    .get(group.date, group.projectId);
+  if (entryRow) {
+    persistInvocationTree(db, entryRow.id, recursive.rootInvocation);
+  }
+
   return {
     skipped: recursive.parsed.skipped,
     skipReason: recursive.parsed.skipped ? recursive.parsed.skipReason : undefined,

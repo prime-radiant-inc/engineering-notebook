@@ -1,4 +1,4 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   mergeSpans,
   residualGaps,
@@ -6,9 +6,17 @@ import {
   scopedLength,
   parseLlmJsonResponse,
   extractFirstBalancedObject,
+  persistInvocationTree,
+  loadInvocationTree,
+  renderInvocationTree,
   type Scope,
   type Span,
+  type InvocationNode,
 } from "./recursive-summarize";
+import { initDb, closeDb } from "./db";
+import { mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 describe("mergeSpans", () => {
   test("returns empty for empty input", () => {
@@ -245,5 +253,177 @@ describe("scopedLength", () => {
   test("returns 0 for empty scope", () => {
     const scope: Scope = { globalStart: 50, globalEnd: 50, label: "empty" };
     expect(scopedLength(scope)).toBe(0);
+  });
+});
+
+describe("invocation tree persistence", () => {
+  let tempDir: string;
+  let db: ReturnType<typeof initDb>;
+  let entryId: number;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "notebook-rlm-test-"));
+    db = initDb(join(tempDir, "test.db"));
+    db.exec(
+      `INSERT INTO projects (id, path, display_name) VALUES ('myapp', '/p', 'myapp')`
+    );
+    db.exec(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES ('s1', 'myapp', '/p', '/p/s1.jsonl', '2026-05-13T10:00:00Z', 5, datetime('now'))`
+    );
+    const res = db
+      .prepare(
+        `INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, generated_at, model_used)
+         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`
+      )
+      .run("2026-05-13", "myapp", "[\"s1\"]", "h", "s", "test");
+    entryId = Number(res.lastInsertRowid);
+  });
+
+  afterEach(() => {
+    closeDb();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function makeNode(
+    overrides: Partial<InvocationNode> & { scope: Scope }
+  ): InvocationNode {
+    return {
+      depth: 0,
+      question: "test question",
+      coherenceToken: "abc123",
+      startedAt: "2026-05-13T10:00:00.000Z",
+      endedAt: "2026-05-13T10:00:05.000Z",
+      actions: [],
+      fragments: [],
+      children: [],
+      result: { skipped: false, headline: "h", summary: "s", topics: [], openQuestions: [] },
+      ...overrides,
+    };
+  }
+
+  test("round-trips a single root invocation with no children", () => {
+    const root = makeNode({
+      scope: { globalStart: 0, globalEnd: 1500, label: "root" },
+      actions: [
+        { step: 0, action: "auto_read", detail: "0, 1500", result_preview: "**User:** hi" },
+      ],
+      fragments: [
+        {
+          charStart: 0,
+          charEnd: 1500,
+          sessionId: "s1",
+          spanChecksum: "deadbeef",
+          category: "leaf_read",
+          text: "**User:** hi",
+        },
+      ],
+    });
+    persistInvocationTree(db, entryId, root);
+
+    const tree = loadInvocationTree(db, entryId);
+    expect(tree).not.toBeNull();
+    expect(tree!.root.depth).toBe(0);
+    expect(tree!.root.scopeStart).toBe(0);
+    expect(tree!.root.scopeEnd).toBe(1500);
+    expect(tree!.root.coherenceToken).toBe("abc123");
+    expect(tree!.root.children).toEqual([]);
+    expect(tree!.root.actions.length).toBe(1);
+    expect(tree!.root.actions[0]!.action).toBe("auto_read");
+    expect(tree!.root.fragments.length).toBe(1);
+    expect(tree!.root.fragments[0]!.charStart).toBe(0);
+    expect(tree!.root.fragments[0]!.spanChecksum).toBe("deadbeef");
+  });
+
+  test("round-trips a tree with children and grandchildren", () => {
+    const grandchild = makeNode({
+      scope: { globalStart: 0, globalEnd: 250, label: "root/[0-500]/[0-250]" },
+      depth: 2,
+      coherenceToken: "gg",
+    });
+    const child1 = makeNode({
+      scope: { globalStart: 0, globalEnd: 500, label: "root/[0-500]" },
+      depth: 1,
+      coherenceToken: "c1",
+      children: [grandchild],
+    });
+    const child2 = makeNode({
+      scope: { globalStart: 500, globalEnd: 1000, label: "root/[500-1000]" },
+      depth: 1,
+      coherenceToken: "c2",
+    });
+    const root = makeNode({
+      scope: { globalStart: 0, globalEnd: 2000, label: "root" },
+      coherenceToken: "rrr",
+      children: [child1, child2],
+    });
+
+    persistInvocationTree(db, entryId, root);
+    const tree = loadInvocationTree(db, entryId);
+    expect(tree).not.toBeNull();
+    expect(tree!.root.coherenceToken).toBe("rrr");
+    expect(tree!.root.children.length).toBe(2);
+    const reloadedC1 = tree!.root.children.find((c) => c.coherenceToken === "c1");
+    expect(reloadedC1).toBeDefined();
+    expect(reloadedC1!.children.length).toBe(1);
+    expect(reloadedC1!.children[0]!.coherenceToken).toBe("gg");
+    expect(reloadedC1!.children[0]!.depth).toBe(2);
+  });
+
+  test("idempotent: rewriting deletes prior tree", () => {
+    const v1 = makeNode({
+      scope: { globalStart: 0, globalEnd: 500, label: "root" },
+      coherenceToken: "v1",
+    });
+    persistInvocationTree(db, entryId, v1);
+    const v2 = makeNode({
+      scope: { globalStart: 0, globalEnd: 1000, label: "root" },
+      coherenceToken: "v2",
+    });
+    persistInvocationTree(db, entryId, v2);
+
+    const reloaded = loadInvocationTree(db, entryId);
+    expect(reloaded).not.toBeNull();
+    expect(reloaded!.root.coherenceToken).toBe("v2");
+    expect(reloaded!.root.scopeEnd).toBe(1000);
+
+    // Verify only one root invocation remains in the DB.
+    const count = db
+      .query<{ n: number }, []>(
+        `SELECT COUNT(*) as n FROM journal_invocations`
+      )
+      .get();
+    expect(count!.n).toBe(1);
+  });
+
+  test("loadInvocationTree returns null when no tree exists", () => {
+    expect(loadInvocationTree(db, entryId)).toBeNull();
+  });
+
+  test("renderInvocationTree produces readable output", () => {
+    const root = makeNode({
+      scope: { globalStart: 0, globalEnd: 1500, label: "root" },
+      actions: [
+        { step: 0, action: "auto_read", detail: "0, 1500", result_preview: "hello" },
+      ],
+      fragments: [
+        {
+          charStart: 0,
+          charEnd: 100,
+          sessionId: "s1",
+          spanChecksum: "x",
+          category: "leaf_read",
+          text: "hello",
+        },
+      ],
+    });
+    persistInvocationTree(db, entryId, root);
+    const tree = loadInvocationTree(db, entryId);
+    const rendered = renderInvocationTree(tree!);
+
+    expect(rendered).toContain("invocation #");
+    expect(rendered).toContain("scope=[0,1500)");
+    expect(rendered).toContain("auto_read");
+    expect(rendered).toContain("fragments: 1");
   });
 });
