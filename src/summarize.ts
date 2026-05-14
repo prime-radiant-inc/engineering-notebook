@@ -105,6 +105,9 @@ export type SessionGroup = {
   projectName: string;
   sessionIds: string[];
   conversations: string[];
+  /** Per-entry source session ID, parallel to `conversations`. A single
+   *  session can appear in multiple entries when its messages span midnight. */
+  conversationSources: string[];
 };
 
 type ConvoRow = {
@@ -221,6 +224,7 @@ export function groupSessionsByDateAndProject(
             projectName: row.display_name,
             sessionIds: [],
             conversations: [],
+            conversationSources: [],
           });
         }
         const group = groups.get(key)!;
@@ -228,6 +232,7 @@ export function groupSessionsByDateAndProject(
           group.sessionIds.push(row.session_id);
         }
         group.conversations.push(chunk);
+        group.conversationSources.push(row.session_id);
       }
     } else {
       // Old-format timestamps: fall back to session's started_at date
@@ -243,6 +248,7 @@ export function groupSessionsByDateAndProject(
           projectName: row.display_name,
           sessionIds: [],
           conversations: [],
+          conversationSources: [],
         });
       }
       const group = groups.get(key)!;
@@ -250,6 +256,7 @@ export function groupSessionsByDateAndProject(
         group.sessionIds.push(row.session_id);
       }
       group.conversations.push(row.conversation_markdown);
+      group.conversationSources.push(row.session_id);
     }
   }
 
@@ -538,9 +545,81 @@ export async function summarizeGroup(
   db: Database,
   config?: Partial<SummarizerConfig>
 ): Promise<{ skipped: boolean; skipReason?: string }> {
-  const { parsed, modelUsed } = await explainGroup(group, config);
-  upsertJournalEntry(db, group, parsed, modelUsed);
-  return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
+  const settings = resolveSummarizerSettings(config);
+
+  const transcript = group.conversations.join("\n\n---\n\n");
+
+  // Provider-agnostic routing:
+  //   - If transcript fits in the provider's one-shot threshold: one-shot
+  //     sandwich-format summarization (fastest, validated quality).
+  //   - Otherwise: recursive RLM-style orchestrator that subdivides the
+  //     transcript with sandboxed scopes and mandatory complete coverage.
+  //
+  // Per-provider one-shot thresholds:
+  //   - claude: very large (200K+ tokens for Sonnet, 1M for Opus 4.7)
+  //   - openai-compat: depends on backing model; Qwen3.6 honors up to 161K
+  //     prompt tokens (~500KB chars). Conservative default 800K chars.
+  const oneShotThreshold = oneShotThresholdForProvider(settings.provider);
+
+  if (transcript.length <= oneShotThreshold) {
+    if (settings.provider === "openai-compat") {
+      const { summarizeOneShot } = await import("./oneshot-summarize");
+      const oneShot = await summarizeOneShot(
+        group.projectName,
+        group.date,
+        transcript,
+        config
+      );
+      upsertJournalEntry(db, group, oneShot.parsed, oneShot.modelUsed);
+      return {
+        skipped: oneShot.parsed.skipped,
+        skipReason: oneShot.parsed.skipped ? oneShot.parsed.skipReason : undefined,
+      };
+    }
+    // Claude provider one-shot path stays via explainGroup (uses the Agent
+    // SDK's prompt envelope which differs from the OpenAI HTTP shape).
+    const { parsed, modelUsed } = await explainGroup(group, config);
+    upsertJournalEntry(db, group, parsed, modelUsed);
+    return {
+      skipped: parsed.skipped,
+      skipReason: parsed.skipped ? parsed.skipReason : undefined,
+    };
+  }
+
+  // Above-threshold: recursive RLM-style orchestrator. Provider-agnostic;
+  // uses the same provider routing internally (claude or openai-compat).
+  const { summarizeRecursive } = await import("./recursive-summarize");
+  const recursive = await summarizeRecursive(
+    group.projectName,
+    group.date,
+    transcript,
+    config,
+    {
+      onProgress: (msg) => console.log(msg),
+    }
+  );
+  upsertJournalEntry(db, group, recursive.parsed, recursive.modelUsed);
+  return {
+    skipped: recursive.parsed.skipped,
+    skipReason: recursive.parsed.skipped ? recursive.parsed.skipReason : undefined,
+  };
+}
+
+/** Per-provider one-shot threshold (chars). Above this, the recursive
+ *  orchestrator is used to subdivide the transcript. */
+function oneShotThresholdForProvider(provider: SummaryProvider): number {
+  switch (provider) {
+    case "claude":
+      // Claude Sonnet 4.x has 200K-token context; Opus 4.7 has 1M. Either
+      // can handle multi-megabyte transcripts in one shot. We set a high
+      // ceiling to avoid surprises but in practice this rarely triggers
+      // recursive for the Claude provider.
+      return 4_000_000;
+    case "openai-compat":
+      // Validated empirically up to 492KB / 161K tokens on Qwen3.6 with
+      // 256K context (2026-05-13). Conservative ceiling leaves headroom.
+      return 800_000;
+  }
 }
 
 export type SummarizeOutcome =

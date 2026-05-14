@@ -61,6 +61,19 @@ export function initDb(dbPath: string): Database {
       UNIQUE(date, project_id)
     );
 
+    CREATE TABLE IF NOT EXISTS journal_fragments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      journal_entry_id INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+      chunk_index INTEGER NOT NULL,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      char_start INTEGER NOT NULL,
+      char_end INTEGER NOT NULL,
+      span_checksum TEXT NOT NULL,
+      category TEXT NOT NULL,
+      text TEXT NOT NULL,
+      extracted_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS journal_rollups (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       period TEXT NOT NULL,
@@ -84,6 +97,8 @@ export function initDb(dbPath: string): Database {
     CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source_path);
     CREATE INDEX IF NOT EXISTS idx_rollups_period ON journal_rollups(period, period_start);
     CREATE INDEX IF NOT EXISTS idx_rollups_project ON journal_rollups(project_id);
+    CREATE INDEX IF NOT EXISTS idx_fragments_entry ON journal_fragments(journal_entry_id);
+    CREATE INDEX IF NOT EXISTS idx_fragments_session ON journal_fragments(session_id);
   `);
 
   // Migrations
