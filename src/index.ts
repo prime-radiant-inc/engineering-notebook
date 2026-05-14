@@ -154,6 +154,60 @@ switch (command) {
     closeDb();
     break;
   }
+  case "skipped": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+
+    const limitIdx = process.argv.indexOf("--limit");
+    const limit = limitIdx !== -1 ? parseInt(process.argv[limitIdx + 1] ?? "20", 10) : 20;
+    const sinceIdx = process.argv.indexOf("--since");
+    const sinceDate = sinceIdx !== -1 ? process.argv[sinceIdx + 1] : undefined;
+    const projectIdx = process.argv.indexOf("--project");
+    const filterProject = projectIdx !== -1 ? process.argv[projectIdx + 1] : undefined;
+
+    const conditions: string[] = ["headline = ''"];
+    const params: (string | number)[] = [];
+    if (sinceDate) {
+      conditions.push("date >= ?");
+      params.push(sinceDate);
+    }
+    if (filterProject) {
+      conditions.push("project_id = ?");
+      params.push(filterProject);
+    }
+    const where = conditions.join(" AND ");
+
+    const rows = db
+      .query<
+        { date: string; project_id: string; summary: string; generated_at: string },
+        (string | number)[]
+      >(
+        `SELECT date, project_id, summary, generated_at FROM journal_entries
+         WHERE ${where}
+         ORDER BY date DESC, project_id ASC
+         LIMIT ?`
+      )
+      .all(...params, limit);
+
+    if (rows.length === 0) {
+      console.log("No skipped entries match the filters.");
+      closeDb();
+      break;
+    }
+
+    console.log(`# Skipped journal entries (${rows.length} shown)`);
+    console.log(`# Use --since YYYY-MM-DD --project NAME --limit N to filter.`);
+    console.log(`# To re-evaluate one: delete from journal_entries WHERE date=X AND project_id=Y; then summarize --date X --project Y`);
+    console.log();
+    for (const row of rows) {
+      console.log(`## ${row.date} — ${row.project_id}`);
+      console.log(`generated: ${row.generated_at}`);
+      console.log(row.summary);
+      console.log();
+    }
+    closeDb();
+    break;
+  }
   case "rollup": {
     const config = loadConfig();
     const db = initDb(config.db_path);
@@ -246,6 +300,6 @@ switch (command) {
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|rollup|serve|config>");
+    console.log("Usage: notebook <ingest|summarize|skipped|rollup|serve|config>");
     process.exit(1);
 }
