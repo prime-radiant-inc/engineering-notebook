@@ -37,15 +37,54 @@ switch (command) {
       }
     }
 
+    const startMs = Date.now();
     console.log(`Scanning ${sources.length} source(s)...`);
-    const files = scanSources(sources, config.exclude);
-    console.log(`Found ${files.length} session file(s)`);
+    const files: string[] = [];
+    for (const s of sources) {
+      const found = scanSources([s], config.exclude);
+      files.push(...found);
+      console.log(`  ${found.length.toLocaleString()} in ${s}`);
+    }
+    console.log(`Found ${files.length.toLocaleString()} session file(s)`);
 
-    const result = ingestSessions(files, db, force);
+    const isTty = process.stderr.isTTY;
+    const barWidth = Math.max(20, Math.min(40, (process.stdout.columns ?? 80) - 30));
+    const renderBar = (done: number, total: number): string => {
+      const partials = "▏▎▍▌▋▊▉";
+      const ratio = total > 0 ? Math.min(1, done / total) : 1;
+      const eighths = Math.round(ratio * barWidth * 8);
+      const full = Math.floor(eighths / 8);
+      const partial = eighths % 8;
+      const partialChar = partial > 0 && full < barWidth ? partials[partial - 1]! : "";
+      const empty = Math.max(0, barWidth - full - (partialChar ? 1 : 0));
+      return "█".repeat(full) + partialChar + " ".repeat(empty);
+    };
+    let lastTickMs = 0;
+    const result = ingestSessions(files, db, force, (done, total) => {
+      if (!isTty) return;
+      const now = Date.now();
+      if (now - lastTickMs < 100 && done < total) return;
+      lastTickMs = now;
+      const pct = total > 0 ? Math.floor((done / total) * 100) : 100;
+      process.stderr.write(
+        `\r\x1b[2K  [${renderBar(done, total)}] ${pct.toString().padStart(3)}% · ${done.toLocaleString()}/${total.toLocaleString()}`
+      );
+    });
+    if (isTty) process.stderr.write("\r\x1b[2K");
+
+    const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
     console.log(
-      `Ingested: ${result.ingested}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
+      `Ingested ${result.ingested.toLocaleString()} session(s) (${result.totalMessages.toLocaleString()} messages) in ${elapsed}s`
     );
+    if (result.skipped > 0) {
+      const parts: string[] = [];
+      if (result.alreadyIngested) parts.push(`${result.alreadyIngested.toLocaleString()} already ingested`);
+      if (result.empty) parts.push(`${result.empty.toLocaleString()} empty`);
+      if (result.duplicateId) parts.push(`${result.duplicateId.toLocaleString()} duplicate id`);
+      console.log(`Skipped ${result.skipped.toLocaleString()}: ${parts.join(", ")}`);
+    }
     if (result.errors.length > 0) {
+      console.log(`Errors: ${result.errors.length}`);
       for (const err of result.errors.slice(0, 10)) {
         console.error(`  ${err}`);
       }
