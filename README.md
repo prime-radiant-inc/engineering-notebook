@@ -1,6 +1,6 @@
 # Engineering Notebook
 
-A CLI tool that ingests [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://openai.com/index/introducing-codex/) session transcripts, generates LLM-powered daily summaries, and serves a web UI for browsing your engineering journal.
+A CLI tool that ingests [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://openai.com/index/introducing-codex/), and [Cursor](https://cursor.com) session transcripts, generates LLM-powered daily summaries, and serves a web UI for browsing your engineering journal.
 
 Think of it as an automatic engineering diary — it watches your AI coding sessions and distills them into a searchable, browsable narrative of what you built, what problems you hit, and what decisions you made.
 
@@ -8,7 +8,7 @@ Think of it as an automatic engineering diary — it watches your AI coding sess
 
 ## How It Works
 
-1. **Ingest** — Scans directories of Claude Code and Codex JSONL session files, parses out the human-readable conversation (stripping tool calls, thinking blocks, etc.), and stores them in SQLite.
+1. **Ingest** — Scans directories of Claude Code, Codex, and Cursor JSONL session files, parses out the human-readable conversation (stripping tool calls, thinking blocks, etc.), and stores them in SQLite.
 2. **Summarize** — Groups sessions by date and project, then uses Claude to write concise engineering journal entries with headlines, summaries, topics, and open questions.
 3. **Serve** — Runs a web server with a browsable UI: daily journal, project timelines, calendar/Gantt view, session transcripts, full-text search, and an iCal feed.
 
@@ -141,6 +141,37 @@ webcal://localhost:3000/api/calendar.ics
 ```
 
 This creates calendar events for each journal entry, viewable in Apple Calendar, Google Calendar, Outlook, etc.
+
+## Cursor support
+
+Cursor sessions live under `~/.cursor/projects` (Cursor's `agent-transcripts/`
+layout). This source is **not** scanned by default — add it explicitly:
+
+```sh
+engineering-notebook ingest --source ~/.cursor/projects
+```
+
+Or add `~/.cursor/projects` to the `sources` array in your config.
+
+Cursor's transcript format is leaner than Claude Code's or Codex's, so a few
+caveats apply:
+
+- **Timestamps come from file modification times.** Cursor transcripts contain no
+  per-message timestamps, so a session's start and end are taken from the file's
+  creation and last-modified times, and per-message times are approximate. Copying
+  or restoring transcript files can reset these.
+- **Project names are the raw encoded directory string** (for example
+  `Users-username-GitRepos-my-repo`). Cursor does not record the working directory,
+  and its directory names encode the path lossily — both `/` and `.` collapse to
+  `-` — so the name is shown verbatim rather than guessed at.
+- **Cursor sessions do not auto-merge** with the same repository's Claude Code or
+  Codex sessions, which group by the real working-directory name.
+- **Some Cursor projects appear under an opaque numeric id** (for example
+  `1700000000000`) when Cursor stored no recoverable path.
+
+Planned improvements (not yet implemented): stripping `<attached_files>` and
+terminal-selection wrappers from Cursor messages, and recovering real project
+names via Cursor's `workspaceStorage` mapping.
 
 ## Development
 
