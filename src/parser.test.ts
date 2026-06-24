@@ -6,6 +6,14 @@ const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.json
 const codexFixturePath = join(import.meta.dir, "../tests/fixtures/test-codex-session-1.jsonl");
 const subagentFixturePath = join(import.meta.dir, "../tests/fixtures/parent-session-id/subagents/agent-aba4e4e.jsonl");
 const commandFixturePath = join(import.meta.dir, "../tests/fixtures/test-command-messages.jsonl");
+const cursorFixturePath = join(
+  import.meta.dir,
+  "../tests/fixtures/cursor/Users-test-GitRepos-demo-app/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl"
+);
+const cursorEpochFixturePath = join(
+  import.meta.dir,
+  "../tests/fixtures/cursor/1700000000000/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl"
+);
 
 describe("parseSession", () => {
   test("extracts session metadata", () => {
@@ -125,5 +133,51 @@ describe("parseSession", () => {
     expect(userMessages.length).toBe(2);
     expect(userMessages[0]!.text).toBe("/brainstorm fix the login bug");
     expect(userMessages[1]!.text).toBe("/commit");
+  });
+
+  test("parses Cursor records (role + message, no type)", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.messages.length).toBe(3);
+    expect(session.messageCount).toBe(3);
+    expect(session.messages[0]!.role).toBe("user");
+    expect(session.messages[0]!.text).toBe("Add a health check endpoint");
+    expect(session.messages[1]!.role).toBe("assistant");
+    expect(session.messages[2]!.role).toBe("assistant");
+  });
+
+  test("joins multiple Cursor text blocks in one message", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.messages[1]!.text).toBe("Sure,\nI'll add a /health route.");
+  });
+
+  test("uses filename UUID as Cursor session id", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.sessionId).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  test("uses full encoded directory as Cursor project name", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.projectName).toBe("Users-test-GitRepos-demo-app");
+    expect(session.assistantDisplayName).toBe("Cursor");
+  });
+
+  test("uses raw epoch id as Cursor project name for opaque dirs", () => {
+    const session = parseSession(cursorEpochFixturePath);
+    expect(session.projectName).toBe("1700000000000");
+  });
+
+  test("derives Cursor timestamps from file times", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.startedAt).toBeTruthy();
+    expect(session.endedAt).toBeTruthy();
+    expect(session.startedAt <= session.endedAt!).toBe(true);
+  });
+
+  test("uses Cursor label in markdown", () => {
+    const session = parseSession(cursorFixturePath);
+    const md = session.toMarkdown();
+    expect(md).toContain("# Session: Users-test-GitRepos-demo-app");
+    expect(md).toContain("**Cursor (");
+    expect(md).toContain("Done. Added GET /health returning 200.");
   });
 });

@@ -170,4 +170,34 @@ describe("ingestSessions", () => {
     expect(session?.version).toBe("0.99.0-alpha.23");
     expect(session?.message_count).toBe(2);
   });
+
+  test("ingests a Cursor session file into the database", () => {
+    const uuid = "11111111-1111-4111-8111-111111111111";
+    const fixturePath = join(
+      import.meta.dir,
+      `../tests/fixtures/cursor/Users-test-GitRepos-demo-app/agent-transcripts/${uuid}/${uuid}.jsonl`
+    );
+    const dir = join(tempDir, "Users-test-GitRepos-demo-app", "agent-transcripts", uuid);
+    mkdirSync(dir, { recursive: true });
+    const sessionFile = join(dir, `${uuid}.jsonl`);
+    copyFileSync(fixturePath, sessionFile);
+
+    const result = ingestSessions([sessionFile], db);
+    expect(result.ingested).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.errors.length).toBe(0);
+
+    const session = db
+      .query("SELECT id, project_id, message_count, is_subagent FROM sessions")
+      .get() as {
+      id: string;
+      project_id: string;
+      message_count: number;
+      is_subagent: number;
+    } | null;
+    expect(session?.id).toBe(uuid);
+    expect(session?.project_id).toBe("Users-test-GitRepos-demo-app");
+    expect(session?.message_count).toBe(3);
+    expect(session?.is_subagent).toBe(0);
+  });
 });
