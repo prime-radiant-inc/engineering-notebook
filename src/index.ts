@@ -97,7 +97,8 @@ switch (command) {
     const { SyncManager } = await import("./sync");
     const syncManager = new SyncManager(config, db);
     const { createApp } = await import("./web/server");
-    const app = createApp(db, syncManager);
+    const react = process.argv.includes("--react");
+    const app = createApp(db, syncManager, { react });
     syncManager.startTimer();
 
     const port = (() => {

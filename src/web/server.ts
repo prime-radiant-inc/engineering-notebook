@@ -12,9 +12,21 @@ import { createGroup, renameGroup, deleteGroup, assignSession } from "../groups"
 import { escapeHtml } from "./views/helpers";
 import { loadConfig, saveConfig, resolveConfigPath, type RemoteSource } from "../config";
 import type { SyncManager } from "../sync";
+import { createApiRouter } from "./api";
+import { serveStatic } from "hono/bun";
 
-export function createApp(db: Database, syncManager: SyncManager): Hono {
+export function createApp(db: Database, syncManager: SyncManager, opts: { react?: boolean } = {}): Hono {
   const app = new Hono();
+
+  // JSON API for the React frontend (additive; legacy routes below unchanged)
+  app.route("/api", createApiRouter(db));
+
+  // React mode: serve the built SPA from web/dist and skip the legacy views.
+  if (opts.react) {
+    app.use("/*", serveStatic({ root: "./web/dist" }));
+    app.get("/*", serveStatic({ path: "./web/dist/index.html" }));
+    return app;
+  }
 
   // ──────────────────────────────────────────
   // Full-page routes
