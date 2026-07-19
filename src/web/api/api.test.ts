@@ -169,4 +169,60 @@ describe("api router", () => {
     expect(res.status).not.toBe(200);
     expect([400, 404]).toContain(res.status);
   });
+
+  test("GET /sessions lists sessions newest-first with total, supports limit/offset and project filter", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p1','/tmp/p1','Project One')").run();
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p2','/tmp/p2','Project Two')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES (?, 'p1', '/tmp/p1', ?, '2026-07-10T00:00:00Z', 3, datetime('now'))`
+    ).run("s1", join(tempDir, "s1.jsonl"));
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES (?, 'p2', '/tmp/p2', ?, '2026-07-12T00:00:00Z', 5, datetime('now'))`
+    ).run("s2", join(tempDir, "s2.jsonl"));
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES (?, 'p1', '/tmp/p1', ?, '2026-07-11T00:00:00Z', 2, datetime('now'))`
+    ).run("s3", join(tempDir, "s3.jsonl"));
+
+    const app = createApiRouter(db);
+
+    const all = await app.request("/sessions");
+    expect(all.status).toBe(200);
+    const allBody = (await all.json()) as any;
+    expect(allBody.total).toBe(3);
+    expect(allBody.sessions.map((s: any) => s.id)).toEqual(["s2", "s3", "s1"]);
+    expect(allBody.sessions[0]).toMatchObject({
+      id: "s2",
+      project_id: "p2",
+      display_name: "Project Two",
+      started_at: "2026-07-12T00:00:00Z",
+      message_count: 5,
+    });
+
+    const paged = await app.request("/sessions?limit=1&offset=1");
+    const pagedBody = (await paged.json()) as any;
+    expect(pagedBody.total).toBe(3);
+    expect(pagedBody.sessions.map((s: any) => s.id)).toEqual(["s3"]);
+
+    const filtered = await app.request("/sessions?project=p1");
+    const filteredBody = (await filtered.json()) as any;
+    expect(filteredBody.total).toBe(2);
+    expect(filteredBody.sessions.map((s: any) => s.id)).toEqual(["s3", "s1"]);
+  });
+
+  test("GET /sessions caps limit at 200 and defaults to 50", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p1','/tmp/p1','Project One')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES (?, 'p1', '/tmp/p1', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`
+    ).run("s1", join(tempDir, "s1.jsonl"));
+
+    const app = createApiRouter(db);
+    const res = await app.request("/sessions?limit=9999");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.sessions.length).toBe(1);
+  });
 });

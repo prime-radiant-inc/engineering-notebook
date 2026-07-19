@@ -26,6 +26,21 @@ export function createApiRouter(db: Database): Hono {
     return c.json({ ...row, subagents });
   });
 
+  api.get("/sessions", (c) => {
+    const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 200);
+    const offset = parseInt(c.req.query("offset") || "0", 10) || 0;
+    const project = c.req.query("project");
+    const where = project ? "WHERE s.project_id = ?" : "";
+    const args = project ? [project] : [];
+    const total = (db.query(`SELECT COUNT(*) c FROM sessions s ${where}`).get(...args) as { c: number }).c;
+    const sessions = db.query(
+      `SELECT s.id, s.project_id, p.display_name, s.started_at, s.ended_at, s.message_count, s.is_subagent
+       FROM sessions s JOIN projects p ON p.id = s.project_id ${where}
+       ORDER BY s.started_at DESC LIMIT ? OFFSET ?`
+    ).all(...args, limit, offset);
+    return c.json({ sessions, total });
+  });
+
   api.get("/subagent/:sessionId/:agentId", (c) => {
     const { sessionId, agentId } = c.req.param();
     const idPattern = /^[A-Za-z0-9_-]+$/;
