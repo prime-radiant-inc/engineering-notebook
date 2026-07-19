@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getSession, getTranscript, type SessionMeta, type Transcript as TranscriptData } from "../api";
 import { MessageList } from "../session/MessageList";
 import { toParsedMessages, toSubagentMap, extractTitle } from "../session/adapt";
+import { useTranscriptToggles } from "../session/toggleContext";
 
 // Panel-3 session viewer — a faithful port of claude-session-viewer's display.
 export function SessionView({ id }: { id: string }) {
@@ -9,8 +10,7 @@ export function SessionView({ id }: { id: string }) {
   const [data, setData] = useState<TranscriptData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showThinking, setShowThinking] = useState(false);
-  const [showTools, setShowTools] = useState(false);
+  const { showThinking, showTools } = useTranscriptToggles();
 
   useEffect(() => {
     setLoading(true);
@@ -27,9 +27,6 @@ export function SessionView({ id }: { id: string }) {
   const subagentMap = useMemo(() => (meta ? toSubagentMap(meta.subagents) : {}), [meta]);
   const firstPrompt = useMemo(() => extractTitle(messages), [messages]);
 
-  const toggleCls = (active: boolean) =>
-    `px-1.5 py-0.5 rounded transition-colors ${active ? "bg-panel text-slate hover:text-ink" : "bg-teal-wash text-teal hover:text-ink"}`;
-
   return (
     <div className="max-w-4xl">
       <div className="mb-6">
@@ -40,12 +37,6 @@ export function SessionView({ id }: { id: string }) {
           {meta && meta.subagents.length > 0 && (
             <span className="text-teal">{meta.subagents.length} subagent{meta.subagents.length !== 1 ? "s" : ""}</span>
           )}
-          <button className={toggleCls(showThinking)} onClick={() => setShowThinking((v) => !v)}>
-            {showThinking ? "Hide thinking" : "Show thinking"}
-          </button>
-          <button className={toggleCls(showTools)} onClick={() => setShowTools((v) => !v)}>
-            {showTools ? "Hide tools" : "Show tools"}
-          </button>
         </div>
       </div>
 

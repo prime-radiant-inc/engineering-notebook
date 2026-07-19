@@ -1,7 +1,17 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SessionView } from "./SessionView";
+import { TranscriptTogglesProvider, TranscriptToggleButtons } from "../session/toggleContext";
 import * as api from "../api";
+
+function renderView(id: string) {
+  return render(
+    <TranscriptTogglesProvider>
+      <TranscriptToggleButtons />
+      <SessionView id={id} />
+    </TranscriptTogglesProvider>,
+  );
+}
 
 describe("SessionView (ported viewer)", () => {
   beforeEach(() => vi.restoreAllMocks());
@@ -29,7 +39,7 @@ describe("SessionView (ported viewer)", () => {
     vi.spyOn(api, "getTranscript").mockResolvedValue(transcript);
     vi.spyOn(api, "getSubagent").mockResolvedValue({ format: "claude", messages: [{ role: "assistant", blocks: [{ kind: "text", content: "SUBAGENT_TEXT" }] }] });
 
-    render(<SessionView id="s1" />);
+    renderView("s1");
     await screen.findByText("the answer");
 
     // default: no thinking, no tools

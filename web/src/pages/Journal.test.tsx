@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { TranscriptTogglesProvider } from "../session/toggleContext";
 import Journal from "./Journal";
 import * as api from "../api";
 
@@ -22,7 +23,7 @@ describe("Journal (3-panel)", () => {
     });
     vi.spyOn(api, "getTranscript").mockResolvedValue({ format: "claude", messages: [{ role: "assistant", blocks: [{ kind: "text", content: "TRANSCRIPT_TEXT" }] }] });
 
-    render(<MemoryRouter><Journal /></MemoryRouter>);
+    render(<MemoryRouter><TranscriptTogglesProvider><Journal /></TranscriptTogglesProvider></MemoryRouter>);
 
     // panel 2: the Claude summary auto-loaded for the first date (headline is unique)
     await screen.findByText("Built the thing");
