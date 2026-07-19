@@ -182,4 +182,15 @@ describe("server", () => {
       expect(html).toContain("sync-status-panel");
     });
   });
+
+  describe("Groups nav", () => {
+    test("layout renders a Groups nav link", async () => {
+      const { renderLayout } = await import("./views/layout");
+      const html = renderLayout("X", { body: "<p>hi</p>", activeTab: "groups" });
+      expect(html).toContain('href="/groups"');
+      expect(html).toContain(">Groups<");
+      // active class applied to the groups link
+      expect(html).toMatch(/href="\/groups"\s+class="active"/);
+    });
+  });
 });

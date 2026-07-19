@@ -9,7 +9,7 @@ type ThreePanelContent = {
 
 type SingleContent = {
   body: string;
-  activeTab?: "calendar";
+  activeTab?: "calendar" | "groups";
 };
 
 type FullWidthContent = {
@@ -34,6 +34,7 @@ export function renderLayout(title: string, content: LayoutContent): string {
   const journalActive = activeTab === "journal";
   const projectsActive = activeTab === "projects";
   const calendarActive = activeTab === "calendar";
+  const groupsActive = activeTab === "groups";
 
   let bodyHtml: string;
   if (isThreePanel(content)) {
@@ -709,6 +710,7 @@ export function renderLayout(title: string, content: LayoutContent): string {
       <a href="/"${journalActive ? ' class="active"' : ""}>Journal</a>
       <a href="/projects"${projectsActive ? ' class="active"' : ""}>Projects</a>
       <a href="/calendar"${calendarActive ? ' class="active"' : ""}>Calendar</a>
+      <a href="/groups"${groupsActive ? ' class="active"' : ""}>Groups</a>
     </nav>
     <div class="spacer"></div>
     <form action="/search" method="get" style="display:flex;">
