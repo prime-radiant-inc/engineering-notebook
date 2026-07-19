@@ -225,4 +225,23 @@ describe("api router", () => {
     const body = (await res.json()) as any;
     expect(body.sessions.length).toBe(1);
   });
+
+  test("GET /sessions clamps limit: honours a small limit and treats a negative limit as bounded (not unlimited)", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p1','/tmp/p1','Project One')").run();
+    for (const id of ["s1", "s2", "s3"]) {
+      db.query(
+        `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+         VALUES (?, 'p1', '/tmp/p1', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`
+      ).run(id, join(tempDir, id + ".jsonl"));
+    }
+    const app = createApiRouter(db);
+
+    const small = (await (await app.request("/sessions?limit=2")).json()) as any;
+    expect(small.sessions.length).toBe(2); // limit actually applied
+    expect(small.total).toBe(3);
+
+    // Negative limit must NOT return all rows (SQLite treats negative LIMIT as unlimited).
+    const neg = (await (await app.request("/sessions?limit=-1")).json()) as any;
+    expect(neg.sessions.length).toBe(0);
+  });
 });

@@ -27,8 +27,10 @@ export function createApiRouter(db: Database): Hono {
   });
 
   api.get("/sessions", (c) => {
-    const limit = Math.min(parseInt(c.req.query("limit") || "50", 10) || 50, 200);
-    const offset = parseInt(c.req.query("offset") || "0", 10) || 0;
+    const rawLimit = parseInt(c.req.query("limit") ?? "", 10);
+    const limit = Number.isNaN(rawLimit) ? 50 : Math.max(0, Math.min(rawLimit, 200));
+    const rawOffset = parseInt(c.req.query("offset") ?? "", 10);
+    const offset = Number.isNaN(rawOffset) ? 0 : Math.max(0, rawOffset);
     const project = c.req.query("project");
     const where = project ? "WHERE s.project_id = ?" : "";
     const args = project ? [project] : [];
