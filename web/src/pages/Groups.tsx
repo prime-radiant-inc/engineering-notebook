@@ -80,7 +80,7 @@ export default function Groups() {
       {sessions.map((s) => (
         <button key={s.id} onClick={() => setSessionId(s.id)}
           className={`block w-full text-left px-3 py-2 border-b border-edge/60 rounded ${s.id === sessionId ? "bg-panel" : "hover:bg-surface"}`}>
-          <div className="text-sm text-ink">{s.display_name || s.project_id}</div>
+          <div className="text-sm text-ink">{s.title || s.display_name || s.project_id}</div>
           <div className="text-[11px] text-slate/70">{s.started_at.slice(0, 10)} · {s.message_count} messages · {s.project_id}</div>
         </button>
       ))}

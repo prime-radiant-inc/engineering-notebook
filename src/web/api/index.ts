@@ -6,6 +6,15 @@ import { parseStructuredTranscript } from "../../transcript-structured";
 import { discoverSubagents, subagentFilePath } from "../../subagents";
 import { listGroups, getGroupWithSessions, listUngroupedSessions, importDesktopGroups } from "../../groups";
 import { readDesktopGroups, isClaudeDesktopRunning } from "../../desktop-groups";
+import { applyDesktopTitles, titleSession } from "../../titles";
+
+/** Resolve a list of session ids to { id, title } (title may be null). */
+function resolveSessionTitles(db: Database, ids: string[]): { id: string; title: string | null }[] {
+  return ids.map((id) => {
+    const row = db.query("SELECT title FROM sessions WHERE id = ?").get(id) as { title: string | null } | null;
+    return { id, title: row?.title ?? null };
+  });
+}
 
 /** JSON API consumed by the React frontend (mounted at /api). */
 export function createApiRouter(db: Database): Hono {
@@ -31,6 +40,7 @@ export function createApiRouter(db: Database): Hono {
       entries: rows.map((e) => ({
         id: e.id, date: e.date, headline: e.headline, summary: e.summary,
         topics: parse(e.topics), open_questions: parse(e.open_questions), session_ids: parse(e.session_ids),
+        sessions: resolveSessionTitles(db, parse(e.session_ids)),
       })),
     });
   });
@@ -66,12 +76,27 @@ export function createApiRouter(db: Database): Hono {
     return c.json(data);
   });
 
+  // Generate + store a title for one Claude Code session that lacks one.
+  api.post("/sessions/:id/title", async (c) => {
+    const id = c.req.param("id");
+    const exists = db.query("SELECT title FROM sessions WHERE id = ?").get(id) as { title: string | null } | null;
+    if (!exists) return c.json({ error: "session not found" }, 404);
+    try {
+      const title = await titleSession(db, id);
+      if (!title) return c.json({ error: "no content to title" }, 422);
+      return c.json({ id, title, title_source: "generated" });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   api.post("/groups/import-desktop", async (c) => {
     try {
       const data = await readDesktopGroups();
       if (!data) return c.json({ imported: false, message: "No Claude Desktop groups found." });
       const summary = importDesktopGroups(db, data);
-      return c.json({ imported: true, summary });
+      const titled = applyDesktopTitles(db); // capture Desktop session names too
+      return c.json({ imported: true, summary: { ...summary, titlesApplied: titled } });
     } catch (err) {
       return c.json({ imported: false, error: err instanceof Error ? err.message : String(err) }, 500);
     }
@@ -87,7 +112,7 @@ export function createApiRouter(db: Database): Hono {
 
   api.get("/sessions/:id", (c) => {
     const id = c.req.param("id");
-    const row = db.query("SELECT id, project_id, project_path, source_path, started_at, ended_at, message_count, git_branch FROM sessions WHERE id = ?").get(id) as any;
+    const row = db.query("SELECT id, project_id, project_path, source_path, started_at, ended_at, message_count, git_branch, title FROM sessions WHERE id = ?").get(id) as any;
     if (!row) return c.json({ error: "session not found" }, 404);
     const subagents = row.source_path ? discoverSubagents(dirname(row.source_path), id) : [];
     return c.json({ ...row, subagents });
@@ -103,7 +128,7 @@ export function createApiRouter(db: Database): Hono {
     const args = project ? [project] : [];
     const total = (db.query(`SELECT COUNT(*) c FROM sessions s ${where}`).get(...args) as { c: number }).c;
     const sessions = db.query(
-      `SELECT s.id, s.project_id, p.display_name, s.started_at, s.ended_at, s.message_count, s.is_subagent
+      `SELECT s.id, s.project_id, p.display_name, s.started_at, s.ended_at, s.message_count, s.is_subagent, s.title
        FROM sessions s JOIN projects p ON p.id = s.project_id ${where}
        ORDER BY s.started_at DESC LIMIT ? OFFSET ?`
     ).all(...args, limit, offset);

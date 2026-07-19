@@ -13,6 +13,7 @@ export type GroupSessionRow = {
   project_id: string;
   started_at: string;
   message_count: number;
+  title: string | null;
 };
 
 function cleanName(name: string): string {
@@ -96,7 +97,7 @@ export function getGroupWithSessions(
   if (!group) return null;
   const sessions = db
     .query(
-      `SELECT s.id, p.display_name, s.project_id, s.started_at, s.message_count
+      `SELECT s.id, p.display_name, s.project_id, s.started_at, s.message_count, s.title
        FROM session_groups sg
        JOIN sessions s ON s.id = sg.session_id
        JOIN projects p ON p.id = s.project_id
@@ -177,7 +178,7 @@ export function listUngroupedSessions(db: Database, limit = 200, offset = 0): { 
     `SELECT COUNT(*) c FROM sessions s WHERE NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)`
   ).get() as { c: number }).c;
   const sessions = db.query(
-    `SELECT s.id, p.display_name, s.project_id, s.started_at, s.message_count
+    `SELECT s.id, p.display_name, s.project_id, s.started_at, s.message_count, s.title
      FROM sessions s JOIN projects p ON p.id = s.project_id
      WHERE NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)
      ORDER BY s.started_at DESC LIMIT ? OFFSET ?`

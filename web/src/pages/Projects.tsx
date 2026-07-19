@@ -48,12 +48,12 @@ export default function Projects() {
               {e.topics.map((t) => <span key={t} className="text-[11px] bg-panel text-slate rounded px-1.5 py-0.5">{t}</span>)}
             </div>
           )}
-          {e.session_ids.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {e.session_ids.map((sid, i) => (
-                <button key={sid} onClick={() => setSessionId(sid)}
-                  className={`text-xs px-2 py-0.5 rounded border ${sid === sessionId ? "bg-teal text-white border-teal" : "border-edge text-slate hover:border-teal"}`}>
-                  session {i + 1}
+          {e.sessions.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {e.sessions.map((s, i) => (
+                <button key={s.id} onClick={() => setSessionId(s.id)}
+                  className={`text-left text-xs px-2 py-1 rounded border ${s.id === sessionId ? "bg-teal text-white border-teal" : "border-edge text-slate hover:border-teal"}`}>
+                  {s.title || `Session ${i + 1}`}
                 </button>
               ))}
             </div>

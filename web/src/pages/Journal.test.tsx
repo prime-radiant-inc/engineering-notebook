@@ -14,12 +14,12 @@ describe("Journal (3-panel)", () => {
     });
     vi.spyOn(api, "getJournalEntries").mockResolvedValue({
       entries: [
-        { id: 1, date: "2026-07-15", project_id: "p", display_name: "My Project", headline: "Built the thing", summary: "Did a lot", topics: ["infra"], open_questions: ["what next?"], session_ids: ["s1"] },
+        { id: 1, date: "2026-07-15", project_id: "p", display_name: "My Project", headline: "Built the thing", summary: "Did a lot", topics: ["infra"], open_questions: ["what next?"], session_ids: ["s1"], sessions: [{ id: "s1", title: null }] },
       ],
     });
     vi.spyOn(api, "getSession").mockResolvedValue({
       id: "s1", project_id: "p", project_path: "/p", source_path: "/p/s1.jsonl",
-      started_at: "2026-07-15T00:00:00Z", ended_at: null, message_count: 1, git_branch: null, subagents: [],
+      started_at: "2026-07-15T00:00:00Z", ended_at: null, message_count: 1, git_branch: null, title: null, subagents: [],
     });
     vi.spyOn(api, "getTranscript").mockResolvedValue({ format: "claude", messages: [{ role: "assistant", blocks: [{ kind: "text", content: "TRANSCRIPT_TEXT" }] }] });
 
@@ -34,7 +34,7 @@ describe("Journal (3-panel)", () => {
 
     // panel 3 empty until a session is chosen
     expect(screen.getByText(/Select a session/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText("session 1"));
+    fireEvent.click(screen.getByText("Session 1"));
     await waitFor(() => expect(screen.getByText("TRANSCRIPT_TEXT")).toBeInTheDocument());
   });
 });

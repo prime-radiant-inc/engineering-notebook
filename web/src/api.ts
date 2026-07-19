@@ -41,6 +41,7 @@ export type SessionListRow = {
   ended_at: string | null;
   message_count: number;
   is_subagent: number;
+  title: string | null;
 };
 
 export type SessionListResponse = { sessions: SessionListRow[]; total: number };
@@ -54,6 +55,7 @@ export type SessionMeta = {
   ended_at: string | null;
   message_count: number;
   git_branch: string | null;
+  title: string | null;
   subagents: Subagent[];
 };
 
@@ -94,6 +96,7 @@ export function getSubagent(sessionId: string, agentId: string): Promise<Transcr
 }
 
 export type JournalDate = { date: string; projects: string[] };
+export type SessionRef = { id: string; title: string | null };
 export type JournalEntry = {
   id: number;
   date: string;
@@ -104,6 +107,7 @@ export type JournalEntry = {
   topics: string[];
   open_questions: string[];
   session_ids: string[];
+  sessions: SessionRef[];
 };
 
 export function getJournalDates(): Promise<{ dates: JournalDate[] }> {
@@ -128,7 +132,7 @@ export function getCalendar(month: string): Promise<{ days: CalendarDay[] }> {
 }
 
 export type GroupRow = { id: number; name: string; sessionCount: number; lastActivityAt: string | null };
-export type GroupSessionRow = { id: string; display_name: string; project_id: string; started_at: string; message_count: number };
+export type GroupSessionRow = { id: string; display_name: string; project_id: string; started_at: string; message_count: number; title: string | null };
 export function getGroups(): Promise<{ groups: GroupRow[]; desktopRunning: boolean }> {
   return getJson("/api/groups");
 }

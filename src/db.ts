@@ -98,6 +98,17 @@ export function initDb(dbPath: string): Database {
     // Column already exists — ignore
   }
   try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN title TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    // 'desktop' | 'user' (renamed in Desktop) | 'generated' (LLM)
+    db.exec(`ALTER TABLE sessions ADD COLUMN title_source TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_desktop_id ON groups(desktop_id) WHERE desktop_id IS NOT NULL`);
   } catch {
     // Index already exists — ignore
