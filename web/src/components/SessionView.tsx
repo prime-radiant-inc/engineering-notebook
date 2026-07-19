@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getSession, getTranscript, type SessionMeta, type Transcript as TranscriptData } from "../api";
 import { MessageList } from "../session/MessageList";
-import { toParsedMessages, toSubagentMap } from "../session/adapt";
+import { toParsedMessages, toSubagentMap, extractTitle } from "../session/adapt";
 
 // Panel-3 session viewer — a faithful port of claude-session-viewer's display.
 export function SessionView({ id }: { id: string }) {
@@ -25,14 +25,7 @@ export function SessionView({ id }: { id: string }) {
 
   const messages = useMemo(() => (data ? toParsedMessages(data.messages) : []), [data]);
   const subagentMap = useMemo(() => (meta ? toSubagentMap(meta.subagents) : {}), [meta]);
-  const firstPrompt = useMemo(() => {
-    for (const m of messages) {
-      if (m.type !== "user" || m.isToolResult) continue;
-      const text = m.content.find((b) => b.type === "text");
-      if (text && text.type === "text" && text.text.trim()) return text.text.trim();
-    }
-    return "";
-  }, [messages]);
+  const firstPrompt = useMemo(() => extractTitle(messages), [messages]);
 
   const toggleCls = (active: boolean) =>
     `px-1.5 py-0.5 rounded transition-colors ${active ? "bg-panel text-slate hover:text-ink" : "bg-teal-wash text-teal hover:text-ink"}`;

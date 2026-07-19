@@ -10,6 +10,7 @@ export interface ParsedMessage {
   uuid: string;
   timestamp?: string;
   model?: string;
+  isMeta?: boolean;
   content: ContentBlock[];
   isToolResult: boolean;
 }

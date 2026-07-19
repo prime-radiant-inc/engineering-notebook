@@ -13,8 +13,36 @@ export function toParsedMessages(messages: StructuredMessage[]): ParsedMessage[]
       }
     });
     const isToolResult = content.length > 0 && content.every((b) => b.type === "tool_result");
-    return { type: m.role, uuid: m.uuid || `msg-${i}`, timestamp: m.timestamp, model: m.model, content, isToolResult };
+    return { type: m.role, uuid: m.uuid || `msg-${i}`, timestamp: m.timestamp, model: m.model, isMeta: m.isMeta, content, isToolResult };
   });
+}
+
+/** Strip command/caveat wrappers so a slash-command reads like "/plugin marketplace add …". */
+export function cleanCommandText(text: string): string {
+  let t = text
+    .replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, "")
+    .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "")
+    .trim();
+  const name = /<command-name>([^<]*)<\/command-name>/.exec(t)?.[1]?.trim();
+  const msg = /<command-message>([^<]*)<\/command-message>/.exec(t)?.[1]?.trim();
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(t)?.[1]?.trim();
+  if (name || msg) {
+    return [name || `/${msg}`, args].filter(Boolean).join(" ").trim();
+  }
+  return t.replace(/<[^>]+>/g, "").trim();
+}
+
+/** The session title = first real (non-meta, non-tool-result) user prompt, command-cleaned. */
+export function extractTitle(messages: ParsedMessage[]): string {
+  for (const m of messages) {
+    if (m.type !== "user" || m.isToolResult || m.isMeta) continue;
+    const textBlock = m.content.find((b) => b.type === "text");
+    if (textBlock && textBlock.type === "text") {
+      const cleaned = cleanCommandText(textBlock.text);
+      if (cleaned) return cleaned.slice(0, 200);
+    }
+  }
+  return "";
 }
 
 /** subagentMap: tool_use id -> agentId, from the session's subagents. */

@@ -1,5 +1,5 @@
 export type StructuredBlock = { kind:"text"|"thinking"|"tool_use"|"tool_result"; content:string; name?:string; id?:string; toolUseId?:string; input?:Record<string,unknown>; isError?:boolean };
-export type StructuredMessage = { role:"user"|"assistant"; uuid?:string; parentUuid?:string|null; timestamp?:string; model?:string; blocks: StructuredBlock[] };
+export type StructuredMessage = { role:"user"|"assistant"; uuid?:string; parentUuid?:string|null; timestamp?:string; model?:string; isMeta?:boolean; blocks: StructuredBlock[] };
 export type StructuredFormat = "claude"|"codex"|"unknown";
 
 function resultToString(content: unknown): string {
@@ -48,7 +48,8 @@ export function parseStructuredTranscript(jsonlText: string): { messages: Struct
     } else continue;
     if (format==="unknown") format = "claude";
     const model = typeof rec?.message?.model === "string" ? rec.message.model : undefined;
-    if (blocks.length) messages.push({ role, uuid: rec.uuid, parentUuid: rec.parentUuid ?? null, timestamp: rec.timestamp, model, blocks });
+    const isMeta = rec?.isMeta === true ? true : undefined;
+    if (blocks.length) messages.push({ role, uuid: rec.uuid, parentUuid: rec.parentUuid ?? null, timestamp: rec.timestamp, model, isMeta, blocks });
   }
   return { messages, format };
 }

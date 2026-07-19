@@ -16,6 +16,7 @@ export type StructuredMessage = {
   parentUuid?: string | null;
   timestamp?: string;
   model?: string;
+  isMeta?: boolean;
   blocks: StructuredBlock[];
 };
 
