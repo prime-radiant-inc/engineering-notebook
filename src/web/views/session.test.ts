@@ -3,7 +3,7 @@ import { renderSessionFooter } from "./session";
 import { beforeEach, afterEach } from "bun:test";
 import { initDb, closeDb } from "../../db";
 import { createGroup, assignSession } from "../../groups";
-import { renderSessionDetail } from "./session";
+import { renderSessionDetail, toolPreview } from "./session";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -166,5 +166,45 @@ describe("session detail thinking/tools toggle", () => {
     const toolsLinkMatch = htmlThinkingOnly.match(/<a href="([^"]+)">Show tools<\/a>/);
     expect(toolsLinkMatch).not.toBeNull();
     expect(toolsLinkMatch![1]).toContain("thinking=1");
+  });
+
+  test("tool call renders collapsible with name, preview, and paired result", () => {
+    const src = join(tempDir, "tool.jsonl");
+    writeFileSync(src, [
+      JSON.stringify({ type: "assistant", message: { content: [
+        { type: "tool_use", id: "tu_9", name: "Bash", input: { command: "ls -la /tmp" } },
+      ] } }),
+      JSON.stringify({ type: "user", message: { content: [
+        { type: "tool_result", tool_use_id: "tu_9", content: "RESULT_PAYLOAD" },
+      ] } }),
+    ].join("\n"));
+    seedWithFile("s1", src);
+    const html = renderSessionDetail(db, "s1", { showTools: true });
+    expect(html).toContain("<details class=\"transcript-tool\"");
+    expect(html).toContain("class=\"tool-name\">Bash");
+    expect(html).toContain("ls -la /tmp");                     // preview + input
+    expect(html).toContain("RESULT_PAYLOAD");                  // paired result present
+    expect((html.match(/RESULT_PAYLOAD/g) || []).length).toBe(1); // not duplicated standalone
+  });
+
+  test("long thinking shows a token estimate", () => {
+    const src = join(tempDir, "think.jsonl");
+    const long = "x".repeat(400);
+    writeFileSync(src, JSON.stringify({ type: "assistant", message: { content: [
+      { type: "thinking", thinking: long },
+    ] } }));
+    seedWithFile("s1", src);
+    const html = renderSessionDetail(db, "s1", { showThinking: true });
+    expect(html).toContain("class=\"transcript-thinking\"");
+    expect(html).toContain("tokens");
+  });
+
+  test("toolPreview returns per-tool one-liners", () => {
+    expect(toolPreview("Bash", { command: "a".repeat(120) }).length).toBe(80);
+    expect(toolPreview("Read", { file_path: "/a.ts" })).toBe("/a.ts");
+    expect(toolPreview("Grep", { pattern: "foo" })).toBe("foo");
+    expect(toolPreview("Task", { description: "do it" })).toBe("do it");
+    expect(toolPreview("Unknown", { x: 1 })).toBe("");
+    expect(toolPreview(undefined, undefined)).toBe("");
   });
 });

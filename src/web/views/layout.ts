@@ -68,6 +68,7 @@ export function renderLayout(title: string, content: LayoutContent): string {
       --text-muted: #57534e;
       --text-faint: #78716c;
       --text-ghost: #a8a29e;
+      --accent: #1a6b5a;
       --font-serif: Georgia, 'Times New Roman', serif;
       --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     }
@@ -703,9 +704,15 @@ export function renderLayout(title: string, content: LayoutContent): string {
     a:hover { color: var(--text); }
 
     .transcript-toggle { display:flex; gap:12px; margin-bottom:14px; font-size:12px; }
-    .transcript-thinking { border-left:2px solid var(--border-subtle); padding:6px 10px; margin:8px 0; color:var(--text-muted); font-style:italic; white-space:pre-wrap; }
-    .transcript-tool { border:1px solid var(--border-subtle); border-radius:4px; padding:8px 10px; margin:8px 0; font-family:monospace; font-size:12px; }
-    .transcript-tool pre { white-space:pre-wrap; margin:4px 0 0; }
+    .transcript-thinking { background:var(--surface); border-radius:14px 14px 14px 4px; padding:10px 14px; margin:8px 0; color:var(--text-muted); font-style:italic; font-size:12px; white-space:pre-wrap; }
+    .transcript-thinking .tokens { display:block; text-align:right; font-size:10px; color:var(--text-ghost); font-style:normal; margin-top:6px; }
+    details.transcript-tool { border:1px solid var(--border); border-radius:10px; padding:6px 10px; margin:8px 0; font-size:12px; }
+    details.transcript-tool > summary { cursor:pointer; list-style:none; color:var(--text-muted); }
+    details.transcript-tool > summary::-webkit-details-marker { display:none; }
+    .transcript-tool .tool-name { color:var(--accent); font-weight:600; font-family:var(--font-sans); }
+    .transcript-tool .tool-preview { color:var(--text-faint); margin-left:8px; font-family:monospace; }
+    .transcript-tool pre { white-space:pre-wrap; margin:6px 0 0; font-family:monospace; font-size:11px; }
+    .transcript-tool .tool-result { border-top:1px solid var(--border-subtle); margin-top:6px; padding-top:6px; }
     .transcript-warning { color:#b91c1c; font-size:12px; margin:8px 0; }
   </style>
 </head>

@@ -40,24 +40,60 @@ function toggleControls(sessionId: string, showThinking: boolean, showTools: boo
   );
 }
 
+export function toolPreview(name: string | undefined, input: Record<string, unknown> | undefined): string {
+  if (!name || !input) return "";
+  const s = (v: unknown) => (typeof v === "string" ? v : "");
+  switch (name) {
+    case "Read": case "Write": case "Edit": return s(input.file_path);
+    case "Bash": return s(input.command).slice(0, 80);
+    case "Glob": case "Grep": return s(input.pattern);
+    case "Task": return s(input.description);
+    case "WebFetch": return s(input.url);
+    default: return "";
+  }
+}
+
 function renderTranscriptItems(items: TranscriptItem[], showThinking: boolean, showTools: boolean): string {
+  const resultsByToolUseId = new Map<string, string>();
+  for (const it of items) {
+    if (it.kind === "tool_result" && it.toolUseId && !resultsByToolUseId.has(it.toolUseId)) {
+      resultsByToolUseId.set(it.toolUseId, it.content);
+    }
+  }
+  const consumed = new Set<string>();
+
   let html = "";
   let hadThinking = false;
   let hadTool = false;
   for (const item of items) {
     if (item.kind === "thinking") { hadThinking = true; if (!showThinking) continue; }
     if (item.kind === "tool_use" || item.kind === "tool_result") { hadTool = true; if (!showTools) continue; }
-    const who = item.role === "user" ? "User" : "Assistant";
+
     if (item.kind === "text") {
+      const who = item.role === "user" ? "User" : "Assistant";
       html += `<div style="margin-bottom:12px;"><div style="font-size:11px; color:var(--text-ghost);">${who}</div><div>${escapeHtml(item.content)}</div></div>`;
     } else if (item.kind === "thinking") {
-      html += `<div class="transcript-thinking">${escapeHtml(item.content)}</div>`;
+      const tokens = item.content.length > 100
+        ? `<span class="tokens">~${Math.round(item.content.length / 4).toLocaleString()} tokens</span>`
+        : "";
+      html += `<div class="transcript-thinking">${escapeHtml(item.content)}${tokens}</div>`;
     } else if (item.kind === "tool_use") {
-      html += `<div class="transcript-tool"><div style="font-weight:600;">🛠 ${escapeHtml(item.name || "tool")}</div><pre>${escapeHtml(item.content)}</pre></div>`;
-    } else {
-      html += `<div class="transcript-tool"><div style="font-weight:600;">↳ result</div><pre>${escapeHtml(item.content)}</pre></div>`;
+      const preview = toolPreview(item.name, item.input);
+      const body = escapeHtml(item.input ? JSON.stringify(item.input, null, 2) : item.content);
+      let resultHtml = "";
+      if (item.id && resultsByToolUseId.has(item.id)) {
+        consumed.add(item.id);
+        resultHtml = `<div class="tool-result"><pre>${escapeHtml(resultsByToolUseId.get(item.id)!)}</pre></div>`;
+      }
+      html += `<details class="transcript-tool"><summary><span class="tool-name">${escapeHtml(item.name || "tool")}</span>` +
+        (preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : "") +
+        `</summary><pre>${body}</pre>${resultHtml}</details>`;
+    } else { // tool_result
+      if (item.toolUseId && consumed.has(item.toolUseId)) continue; // already shown inside its tool_use
+      html += `<div class="transcript-tool" style="display:block;"><div style="font-weight:600; color:var(--text-muted);">&#8627; result</div><pre>${escapeHtml(item.content)}</pre></div>`;
     }
   }
+
   if (showThinking && !hadThinking) {
     html += `<div style="color:var(--text-ghost); font-style:italic; font-size:12px;">No thinking data for this session.</div>`;
   }
