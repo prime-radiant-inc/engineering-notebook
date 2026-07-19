@@ -61,6 +61,19 @@ export function initDb(dbPath: string): Database {
       UNIQUE(date, project_id)
     );
 
+    CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS session_groups (
+      session_id TEXT PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      assigned_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_groups_group ON session_groups(group_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
     CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
