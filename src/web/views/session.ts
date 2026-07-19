@@ -92,7 +92,7 @@ function renderTranscriptItems(items: TranscriptItem[], showThinking: boolean, s
         `</summary><pre>${body}</pre>${resultHtml}</details>`;
     } else { // tool_result
       if (item.toolUseId && toolUseIds.has(item.toolUseId)) continue; // paired inside its tool_use (any order)
-      html += `<div class="transcript-tool" style="display:block;"><div style="font-weight:600; color:var(--text-muted);">&#8627; result</div><pre>${escapeHtml(item.content)}</pre></div>`;
+      html += `<div class="transcript-tool"><div style="font-weight:600; color:var(--text-muted);">&#8627; result</div><pre>${escapeHtml(item.content)}</pre></div>`;
     }
   }
 

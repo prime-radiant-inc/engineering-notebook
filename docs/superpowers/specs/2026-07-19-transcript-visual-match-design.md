@@ -77,7 +77,7 @@ export type TranscriptItem = {
 |------|----------|
 | `tool_use` with no `input` | Summary shows name only (empty preview); body shows empty/`content` string. |
 | `tool_result` with no matching `tool_use` in the set | Rendered standalone in a tool box. |
-| Same `tool_use.id` referenced by multiple results | First consumes; extras render standalone (defensive; shouldn't occur). |
+| Same `tool_use.id` referenced by multiple results | First result is paired inside the tool_use; extras are dropped (defensive; a real transcript has one result per call). |
 | Long thinking (>100 chars) | Token estimate shown; short thinking omits it. |
 | Tools shown, thinking hidden (or vice-versa) | Only the shown kind rendered; dimension-specific note if the shown kind has no data. |
 | Preview/input/result contain HTML | Escaped. |
