@@ -13,9 +13,10 @@
     "engineering-notebook": "src/index.ts"
   },
   "scripts": {
-    "test": "bun test",
+    "test": "bun test ./src",
+    "test:web": "cd web && bunx vitest run",
     "typecheck": "bun --bun node_modules/.bin/tsc --noEmit",
-    "check": "bun test && bun run typecheck",
+    "check": "bun test ./src && bun run typecheck",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
