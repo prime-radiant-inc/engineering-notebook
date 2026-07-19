@@ -1,6 +1,6 @@
 export type TranscriptRole = "user" | "assistant";
 export type TranscriptKind = "text" | "thinking" | "tool_use" | "tool_result";
-export type TranscriptItem = { role: TranscriptRole; kind: TranscriptKind; content: string; name?: string };
+export type TranscriptItem = { role: TranscriptRole; kind: TranscriptKind; content: string; name?: string; id?: string; toolUseId?: string; input?: Record<string, unknown> };
 export type TranscriptFormat = "claude" | "codex" | "unknown";
 
 function toolResultToString(content: unknown): string {
@@ -63,11 +63,17 @@ export function parseTranscript(jsonlText: string): { items: TranscriptItem[]; f
           items.push({
             role, kind: "tool_use",
             name: typeof b.name === "string" ? b.name : undefined,
+            id: typeof b.id === "string" ? b.id : undefined,
+            input: b.input != null && typeof b.input === "object" ? (b.input as Record<string, unknown>) : undefined,
             content: b.input != null ? JSON.stringify(b.input, null, 2) : "",
           });
           break;
         case "tool_result":
-          items.push({ role, kind: "tool_result", content: toolResultToString(b.content) });
+          items.push({
+            role, kind: "tool_result",
+            toolUseId: typeof b.tool_use_id === "string" ? b.tool_use_id : undefined,
+            content: toolResultToString(b.content),
+          });
           break;
       }
     }

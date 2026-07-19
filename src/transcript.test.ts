@@ -23,9 +23,23 @@ describe("parseTranscript", () => {
       { role: "user", kind: "text", content: "hi" },
       { role: "assistant", kind: "thinking", content: "let me think" },
       { role: "assistant", kind: "text", content: "answer" },
-      { role: "assistant", kind: "tool_use", name: "Bash", content: JSON.stringify({ command: "ls" }, null, 2) },
-      { role: "user", kind: "tool_result", content: "file-a\nfile-b" },
+      { role: "assistant", kind: "tool_use", name: "Bash", input: { command: "ls" }, content: JSON.stringify({ command: "ls" }, null, 2) },
+      { role: "user", kind: "tool_result", toolUseId: "t1", content: "file-a\nfile-b" },
     ]);
+  });
+
+  test("captures tool_use id, structured input, and tool_result toolUseId", () => {
+    const lines = [
+      JSON.stringify({ type: "assistant", message: { content: [
+        { type: "tool_use", id: "tu_1", name: "Read", input: { file_path: "/x.ts" } },
+      ] } }),
+      JSON.stringify({ type: "user", message: { content: [
+        { type: "tool_result", tool_use_id: "tu_1", content: "ok" },
+      ] } }),
+    ].join("\n");
+    const { items } = parseTranscript(lines);
+    expect(items[0]).toEqual({ role: "assistant", kind: "tool_use", name: "Read", id: "tu_1", input: { file_path: "/x.ts" }, content: JSON.stringify({ file_path: "/x.ts" }, null, 2) });
+    expect(items[1]).toEqual({ role: "user", kind: "tool_result", toolUseId: "tu_1", content: "ok" });
   });
 
   test("tool_result with array content joins text blocks", () => {
