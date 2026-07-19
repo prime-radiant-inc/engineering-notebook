@@ -51,7 +51,7 @@ export function parseStructuredTranscript(jsonlText: string): { messages: Struct
         if (!b || typeof b!=="object") continue;
         switch (b.type) {
           case "text": if (typeof b.text==="string" && b.text && b.text!=="(no content)") blocks.push({ kind:"text", content:b.text }); break;
-          case "thinking": if (typeof b.thinking==="string" && b.thinking) blocks.push({ kind:"thinking", content:b.thinking }); break;
+          case "thinking": if (typeof b.thinking==="string") blocks.push({ kind:"thinking", content:b.thinking }); break; // keep empty (signature-only/redacted) thinking; UI shows a marker
           case "tool_use": blocks.push({ kind:"tool_use", name: typeof b.name==="string"?b.name:undefined, id: typeof b.id==="string"?b.id:undefined, input: b.input!=null && typeof b.input==="object"? b.input as Record<string,unknown>:undefined, content: b.input!=null? JSON.stringify(b.input,null,2):"" }); break;
           case "tool_result": blocks.push({ kind:"tool_result", toolUseId: typeof b.tool_use_id==="string"?b.tool_use_id:undefined, content: resultToString(b.content), isError: b.is_error === true ? true : undefined }); break;
         }
