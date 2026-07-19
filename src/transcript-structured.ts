@@ -1,5 +1,5 @@
-export type StructuredBlock = { kind:"text"|"thinking"|"tool_use"|"tool_result"; content:string; name?:string; id?:string; toolUseId?:string; input?:Record<string,unknown> };
-export type StructuredMessage = { role:"user"|"assistant"; uuid?:string; parentUuid?:string|null; timestamp?:string; blocks: StructuredBlock[] };
+export type StructuredBlock = { kind:"text"|"thinking"|"tool_use"|"tool_result"; content:string; name?:string; id?:string; toolUseId?:string; input?:Record<string,unknown>; isError?:boolean };
+export type StructuredMessage = { role:"user"|"assistant"; uuid?:string; parentUuid?:string|null; timestamp?:string; model?:string; blocks: StructuredBlock[] };
 export type StructuredFormat = "claude"|"codex"|"unknown";
 
 function resultToString(content: unknown): string {
@@ -42,12 +42,13 @@ export function parseStructuredTranscript(jsonlText: string): { messages: Struct
           case "text": if (typeof b.text==="string" && b.text && b.text!=="(no content)") blocks.push({ kind:"text", content:b.text }); break;
           case "thinking": if (typeof b.thinking==="string" && b.thinking) blocks.push({ kind:"thinking", content:b.thinking }); break;
           case "tool_use": blocks.push({ kind:"tool_use", name: typeof b.name==="string"?b.name:undefined, id: typeof b.id==="string"?b.id:undefined, input: b.input!=null && typeof b.input==="object"? b.input as Record<string,unknown>:undefined, content: b.input!=null? JSON.stringify(b.input,null,2):"" }); break;
-          case "tool_result": blocks.push({ kind:"tool_result", toolUseId: typeof b.tool_use_id==="string"?b.tool_use_id:undefined, content: resultToString(b.content) }); break;
+          case "tool_result": blocks.push({ kind:"tool_result", toolUseId: typeof b.tool_use_id==="string"?b.tool_use_id:undefined, content: resultToString(b.content), isError: b.is_error === true ? true : undefined }); break;
         }
       }
     } else continue;
     if (format==="unknown") format = "claude";
-    if (blocks.length) messages.push({ role, uuid: rec.uuid, parentUuid: rec.parentUuid ?? null, timestamp: rec.timestamp, blocks });
+    const model = typeof rec?.message?.model === "string" ? rec.message.model : undefined;
+    if (blocks.length) messages.push({ role, uuid: rec.uuid, parentUuid: rec.parentUuid ?? null, timestamp: rec.timestamp, model, blocks });
   }
   return { messages, format };
 }

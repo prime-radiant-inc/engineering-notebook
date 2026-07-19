@@ -7,6 +7,7 @@ export type StructuredBlock = {
   id?: string;
   toolUseId?: string;
   input?: Record<string, unknown>;
+  isError?: boolean;
 };
 
 export type StructuredMessage = {
@@ -14,6 +15,7 @@ export type StructuredMessage = {
   uuid?: string;
   parentUuid?: string | null;
   timestamp?: string;
+  model?: string;
   blocks: StructuredBlock[];
 };
 
