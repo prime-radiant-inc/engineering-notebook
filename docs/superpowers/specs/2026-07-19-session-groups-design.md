@@ -39,22 +39,24 @@ CREATE TABLE IF NOT EXISTS groups (
 );
 
 CREATE TABLE IF NOT EXISTS session_groups (
-  session_id  TEXT PRIMARY KEY REFERENCES sessions(id),  -- PK => one group per session
-  group_id    INTEGER NOT NULL REFERENCES groups(id),
+  session_id  TEXT PRIMARY KEY,                                  -- one group per session; NO FK (see below)
+  group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   assigned_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_groups_group ON session_groups(group_id);
 ```
 
-**Why a separate `session_groups` table, not a `group_id` column on `sessions`:**
-`src/ingest.ts` runs `DELETE FROM sessions WHERE id = ?` on re-ingest (and `--force`). A column on the sessions row would be wiped. A separate membership table keyed by the stable session UUID survives, because ingest never touches it. When a session is deleted and re-ingested with the same id, its membership row still applies.
+**Foreign-key enforcement is ON.** `initDb` runs `PRAGMA foreign_keys = ON`. This is the constraint that shapes the schema:
+
+- **`session_id` has NO foreign key** (deliberately). `src/ingest.ts` runs `DELETE FROM sessions WHERE id = ?` on `--force` re-ingest. If `session_id` referenced `sessions(id)`, that DELETE would be blocked by the FK (RESTRICT) and re-ingest would throw. Keeping `session_id` a bare `TEXT PRIMARY KEY` means ingest never touches membership, so it survives re-ingest. When a session is deleted and re-inserted with the same UUID, its membership row still applies.
+- **`group_id` references `groups(id) ON DELETE CASCADE`.** With FK enforcement on, deleting a group automatically removes its membership rows — no manual cleanup needed.
 
 **Cardinality:** `session_id` as PRIMARY KEY enforces one-group-per-session at the schema level. Reassigning a session is an upsert (`INSERT ... ON CONFLICT(session_id) DO UPDATE`).
 
-**Group deletion:** the app does not rely on SQLite foreign-key enforcement, so `deleteGroup` explicitly deletes the group's `session_groups` rows and then the `groups` row, in a transaction.
+**Group deletion:** `deleteGroup` is a plain `DELETE FROM groups WHERE id = ?`; the `ON DELETE CASCADE` clears memberships.
 
-**Orphans:** a membership row whose `session_id` no longer exists (session permanently removed) is harmless — all read queries `JOIN sessions`, so orphans are filtered out. Optional lazy prune is allowed but not required.
+**Orphans:** a membership row whose `session_id` no longer exists (session permanently removed, not re-ingested) is harmless — all read queries `JOIN sessions`, so orphans are filtered out. Optional lazy prune is allowed but not required.
 
 ## Backend
 
@@ -63,7 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_session_groups_group ON session_groups(group_id);
 - `listGroups(): GroupSummary[]` — each group with `id`, `name`, `sessionCount`, `lastActivityAt` (max of member sessions' `started_at`), ordered by `lastActivityAt` desc (nulls last).
 - `createGroup(name: string): number` — insert, return id; throws / surfaces error on duplicate name (UNIQUE).
 - `renameGroup(id: number, name: string): void` — surfaces duplicate-name error.
-- `deleteGroup(id: number): void` — transaction: delete memberships then group.
+- `deleteGroup(id: number): void` — `DELETE FROM groups WHERE id = ?` (cascade clears memberships).
 - `assignSession(sessionId: string, groupId: number | null): void` — `null` removes membership; otherwise upsert on `session_id`.
 - `getSessionGroupId(sessionId: string): number | null` — current group for rendering the control.
 - `getGroupWithSessions(id: number): { group, sessions[] } | null` — group plus its member sessions (joined to `sessions` and their `projects`), ordered by `started_at` desc. Each session row carries enough to link to its transcript and, where available, its journal entry.
