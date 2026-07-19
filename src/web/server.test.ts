@@ -281,4 +281,32 @@ describe("server", () => {
       expect(db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get()).toBeNull();
     });
   });
+
+  describe("session toggle route", () => {
+    function seedWithFile(id: string, sourcePath: string) {
+      db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+      db.query(
+        `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+         VALUES (?, 'p', '/tmp/p', ?, '2026-07-10T00:00:00Z', 2, datetime('now'))`
+      ).run(id, sourcePath);
+      db.query("INSERT INTO conversations (session_id, conversation_markdown, extracted_at) VALUES (?, '# md', datetime('now'))").run(id);
+    }
+
+    test("?thinking=1 renders thinking; no param does not", async () => {
+      const { writeFileSync } = await import("fs");
+      const src = join(tempDir, "sess.jsonl");
+      writeFileSync(src, JSON.stringify({ type: "assistant", message: { content: [
+        { type: "thinking", thinking: "SECRET_REASONING" }, { type: "text", text: "a" },
+      ] } }));
+      seedWithFile("s1", src);
+      const app = createApp(db, syncManager);
+
+      const on = await app.request("/session/s1?thinking=1");
+      expect(on.status).toBe(200);
+      expect(await on.text()).toContain("SECRET_REASONING");
+
+      const off = await app.request("/session/s1");
+      expect(await off.text()).not.toContain("SECRET_REASONING");
+    });
+  });
 });

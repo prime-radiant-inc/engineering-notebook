@@ -76,7 +76,9 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   // Session detail — show in journal context
   app.get("/session/:id", (c) => {
     const sessionId = c.req.param("id");
-    const panel3 = renderSessionDetail(db, sessionId);
+    const showThinking = c.req.query("thinking") === "1";
+    const showTools = c.req.query("tools") === "1";
+    const panel3 = renderSessionDetail(db, sessionId, { showThinking, showTools });
     // Find the date for this session to select it in the index
     const session = db.query(`SELECT date(started_at) as date FROM sessions WHERE id = ?`).get(sessionId) as { date: string } | null;
     const date = session?.date;
