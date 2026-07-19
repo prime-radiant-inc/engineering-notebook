@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { inferAssistantDisplayName, inferUserDisplayName, renderConversation } from "./conversation";
 import { escapeHtml } from "./helpers";
+import { listGroups, getSessionGroupId } from "../../groups";
 
 /**
  * Render a resume command footer with copy button and source path.
@@ -50,6 +51,19 @@ export function renderSessionDetail(db: Database, sessionId: string): string {
   html += `</div>`;
   html += `<div style="font-size: 11px; color: var(--text-ghost); margin-top: 2px; font-family: monospace;">${escapeHtml(session.id)}</div>`;
   html += `</div>`;
+
+  const groups = listGroups(db);
+  const currentGroupId = getSessionGroupId(db, sessionId);
+  html += `<form action="/sessions/${escapeHtml(sessionId)}/group" method="post" style="margin-bottom:16px; display:flex; gap:8px; align-items:center;">`;
+  html += `<label style="font-size:11px; color:var(--text-ghost);">Group</label>`;
+  html += `<select name="group_id" onchange="this.form.submit()" style="flex:1;">`;
+  html += `<option value=""${currentGroupId === null ? " selected" : ""}>None</option>`;
+  for (const g of groups) {
+    html += `<option value="${g.id}"${currentGroupId === g.id ? " selected" : ""}>${escapeHtml(g.name)}</option>`;
+  }
+  html += `</select>`;
+  html += `<noscript><button type="submit">Save</button></noscript>`;
+  html += `</form>`;
 
   if (session.conversation_markdown) {
     html += renderConversation(
