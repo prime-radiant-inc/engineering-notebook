@@ -28,10 +28,14 @@ export function createApiRouter(db: Database): Hono {
 
   api.get("/subagent/:sessionId/:agentId", (c) => {
     const { sessionId, agentId } = c.req.param();
+    const idPattern = /^[A-Za-z0-9_-]+$/;
+    if (!idPattern.test(sessionId) || !idPattern.test(agentId)) {
+      return c.json({ error: "invalid agent id" }, 400);
+    }
     const row = db.query("SELECT source_path FROM sessions WHERE id = ?").get(sessionId) as { source_path: string } | null;
     if (!row) return c.json({ error: "session not found" }, 404);
     const path = subagentFilePath(dirname(row.source_path), sessionId, agentId);
-    if (!existsSync(path)) return c.json({ error: "subagent not found" }, 404);
+    if (!path || !existsSync(path)) return c.json({ error: "subagent not found" }, 404);
     return c.json(parseStructuredTranscript(readFileSync(path, "utf-8")));
   });
 

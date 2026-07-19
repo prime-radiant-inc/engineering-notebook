@@ -138,4 +138,35 @@ describe("api router", () => {
     const res = await app.request("/subagent/s5/missing-agent");
     expect(res.status).toBe(404);
   });
+
+  test("GET /subagent/:sessionId/:agentId rejects path traversal in agentId and never leaks foreign files", async () => {
+    const sourcePath = join(tempDir, "s6.jsonl");
+    writeFileSync(sourcePath, "");
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES (?, 'p', '/tmp/p', ?, '2026-07-10T00:00:00Z', 0, datetime('now'))`
+    ).run("s6", sourcePath);
+
+    // Sentinel file living outside the s6/subagents directory that a traversal attack would target.
+    // "../../../../some-file" decoded, joined against `agent-${agentId}.jsonl` and the subagents
+    // dir (tempDir/s6/subagents), resolves to tempDir/some-file.jsonl -- outside the subagents dir.
+    const sentinelPath = join(tempDir, "some-file.jsonl");
+    const sentinelContents = JSON.stringify({ secret: "should-never-be-returned" });
+    writeFileSync(sentinelPath, sentinelContents);
+
+    const app = createApiRouter(db);
+    const res = await app.request("/subagent/s6/..%2F..%2F..%2F..%2Fsome-file");
+    expect(res.status).not.toBe(200);
+    expect([400, 404]).toContain(res.status);
+    const text = await res.text();
+    expect(text).not.toContain("should-never-be-returned");
+  });
+
+  test("GET /subagent/:sessionId/:agentId rejects a non-charset-matching sessionId", async () => {
+    const app = createApiRouter(db);
+    const res = await app.request("/subagent/..%2F..%2Fetc/a2");
+    expect(res.status).not.toBe(200);
+    expect([400, 404]).toContain(res.status);
+  });
 });

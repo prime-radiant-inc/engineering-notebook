@@ -68,4 +68,8 @@ describe("subagentFilePath", () => {
       join("/proj", "sess-1", "subagents", "agent-abc.jsonl")
     );
   });
+
+  test("returns null when agentId traverses outside the subagents dir", () => {
+    expect(subagentFilePath("/proj", "sess-1", "../../../../etc/passwd")).toBeNull();
+  });
 });

@@ -1,13 +1,24 @@
 import { existsSync, readdirSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, resolve, sep } from "path";
 
 export type Subagent = { agentId:string; agentType?:string; description?:string; toolUseId?:string; spawnDepth?:number };
 
 export function subagentDir(projectDir: string, sessionId: string): string {
   return join(projectDir, sessionId, "subagents");
 }
-export function subagentFilePath(projectDir: string, sessionId: string, agentId: string): string {
-  return join(subagentDir(projectDir, sessionId), `agent-${agentId}.jsonl`);
+
+/**
+ * Builds the on-disk path for a subagent's transcript, then asserts the resolved
+ * path is still contained within the subagent directory. This is a defense-in-depth
+ * check: callers should also validate agentId's shape before reaching here, but this
+ * guards against any future caller that forgets to.
+ */
+export function subagentFilePath(projectDir: string, sessionId: string, agentId: string): string | null {
+  const dir = subagentDir(projectDir, sessionId);
+  const candidate = resolve(join(dir, `agent-${agentId}.jsonl`));
+  const containingDir = resolve(dir) + sep;
+  if (!candidate.startsWith(containingDir)) return null;
+  return candidate;
 }
 
 export function discoverSubagents(projectDir: string, sessionId: string): Subagent[] {
