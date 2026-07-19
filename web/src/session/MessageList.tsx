@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { ParsedMessage } from "./types";
 import { MessageBlock } from "./MessageBlock";
-import { buildToolResultMap, buildContinuationFlags } from "./adapt";
+import { buildToolResultMap, buildContinuationFlags, isDisplayableMessage } from "./adapt";
 
 export function MessageList({
   messages,
@@ -20,12 +20,13 @@ export function MessageList({
   userName?: string;
   assistantLabel?: string;
 }) {
-  const { toolResultMap, consumedUuids } = useMemo(() => buildToolResultMap(messages), [messages]);
-  const continuationFlags = useMemo(() => buildContinuationFlags(messages), [messages]);
+  const shown = useMemo(() => messages.filter(isDisplayableMessage), [messages]);
+  const { toolResultMap, consumedUuids } = useMemo(() => buildToolResultMap(shown), [shown]);
+  const continuationFlags = useMemo(() => buildContinuationFlags(shown), [shown]);
 
   return (
     <div className="space-y-3">
-      {messages.map((msg, i) => (
+      {shown.map((msg, i) => (
         <MessageBlock
           key={msg.uuid}
           message={msg}

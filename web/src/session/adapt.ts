@@ -32,6 +32,22 @@ export function cleanCommandText(text: string): string {
   return t.replace(/<[^>]+>/g, "").trim();
 }
 
+/**
+ * Whether a message should appear in the transcript. Hides synthetic records the
+ * user didn't author: isMeta (the <local-command-caveat> wrapper) and user messages
+ * whose text is purely command scaffolding/output (e.g. <local-command-stdout>…).
+ * Keeps real prompts, slash-command invocations, tool calls, and tool results.
+ */
+export function isDisplayableMessage(m: ParsedMessage): boolean {
+  if (m.isMeta) return false;
+  if (m.isToolResult) return true;
+  const textBlocks = m.content.filter((b) => b.type === "text");
+  if (textBlocks.length === 0) return true; // tool_use-only, etc.
+  if (!m.content.every((b) => b.type === "text")) return true; // mixed content → keep
+  // all-text message: hide only if every block cleans away to nothing (pure scaffolding/output)
+  return !textBlocks.every((b) => b.type === "text" && cleanCommandText(b.text) === "");
+}
+
 /** The session title = first real (non-meta, non-tool-result) user prompt, command-cleaned. */
 export function extractTitle(messages: ParsedMessage[]): string {
   for (const m of messages) {

@@ -1,6 +1,22 @@
 import { describe, test, expect } from "vitest";
-import { cleanCommandText, extractTitle } from "./adapt";
+import { cleanCommandText, extractTitle, isDisplayableMessage } from "./adapt";
 import type { ParsedMessage } from "./types";
+
+describe("isDisplayableMessage", () => {
+  const u = (text: string, extra: Partial<ParsedMessage> = {}): ParsedMessage =>
+    ({ type: "user", uuid: "x", isToolResult: false, content: [{ type: "text", text }], ...extra });
+
+  test("hides isMeta (caveat) and pure command output", () => {
+    expect(isDisplayableMessage(u("<local-command-caveat>c</local-command-caveat>", { isMeta: true }))).toBe(false);
+    expect(isDisplayableMessage(u("<local-command-stdout>Successfully added</local-command-stdout>"))).toBe(false);
+  });
+
+  test("keeps a real prompt, a slash-command invocation, and tool results", () => {
+    expect(isDisplayableMessage(u("please build it"))).toBe(true);
+    expect(isDisplayableMessage(u("<command-name>/plugin</command-name><command-args>install</command-args>"))).toBe(true);
+    expect(isDisplayableMessage({ type: "user", uuid: "r", isToolResult: true, content: [{ type: "tool_result", tool_use_id: "t", content: "out" }] })).toBe(true);
+  });
+});
 
 describe("title extraction", () => {
   test("cleanCommandText turns a slash command into a readable title", () => {
