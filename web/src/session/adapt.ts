@@ -17,46 +17,15 @@ export function toParsedMessages(messages: StructuredMessage[]): ParsedMessage[]
   });
 }
 
-/** Strip command/caveat wrappers so a slash-command reads like "/plugin marketplace add …". */
-export function cleanCommandText(text: string): string {
-  let t = text
-    .replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, "")
-    .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "")
-    .trim();
-  const name = /<command-name>([^<]*)<\/command-name>/.exec(t)?.[1]?.trim();
-  const msg = /<command-message>([^<]*)<\/command-message>/.exec(t)?.[1]?.trim();
-  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(t)?.[1]?.trim();
-  if (name || msg) {
-    return [name || `/${msg}`, args].filter(Boolean).join(" ").trim();
-  }
-  return t.replace(/<[^>]+>/g, "").trim();
-}
-
 /**
- * Whether a message should appear in the transcript. Hides synthetic records the
- * user didn't author: isMeta (the <local-command-caveat> wrapper) and user messages
- * whose text is purely command scaffolding/output (e.g. <local-command-stdout>…).
- * Keeps real prompts, slash-command invocations, tool calls, and tool results.
+ * Session title — matches claude-session-viewer's extractFirstPrompt exactly:
+ * first non-meta user message's text block, sliced to 200 chars, no cleaning.
  */
-export function isDisplayableMessage(m: ParsedMessage): boolean {
-  if (m.isMeta) return false;
-  if (m.isToolResult) return true;
-  const textBlocks = m.content.filter((b) => b.type === "text");
-  if (textBlocks.length === 0) return true; // tool_use-only, etc.
-  if (!m.content.every((b) => b.type === "text")) return true; // mixed content → keep
-  // all-text message: hide only if every block cleans away to nothing (pure scaffolding/output)
-  return !textBlocks.every((b) => b.type === "text" && cleanCommandText(b.text) === "");
-}
-
-/** The session title = first real (non-meta, non-tool-result) user prompt, command-cleaned. */
 export function extractTitle(messages: ParsedMessage[]): string {
   for (const m of messages) {
-    if (m.type !== "user" || m.isToolResult || m.isMeta) continue;
+    if (m.type !== "user" || m.isMeta) continue;
     const textBlock = m.content.find((b) => b.type === "text");
-    if (textBlock && textBlock.type === "text") {
-      const cleaned = cleanCommandText(textBlock.text);
-      if (cleaned) return cleaned.slice(0, 200);
-    }
+    if (textBlock && textBlock.type === "text") return textBlock.text.slice(0, 200);
   }
   return "";
 }

@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { ParsedMessage } from "./types";
 import { MessageBlock } from "./MessageBlock";
-import { buildToolResultMap, buildContinuationFlags, isDisplayableMessage } from "./adapt";
+import { buildToolResultMap, buildContinuationFlags } from "./adapt";
 
 export function MessageList({
   messages,
@@ -20,7 +20,8 @@ export function MessageList({
   userName?: string;
   assistantLabel?: string;
 }) {
-  const shown = useMemo(() => messages.filter(isDisplayableMessage), [messages]);
+  // Match claude-session-viewer's buildConversationThread: skip only isMeta records.
+  const shown = useMemo(() => messages.filter((m) => !m.isMeta), [messages]);
   const { toolResultMap, consumedUuids } = useMemo(() => buildToolResultMap(shown), [shown]);
   const continuationFlags = useMemo(() => buildContinuationFlags(shown), [shown]);
 
