@@ -7,6 +7,8 @@ import { renderSearch, renderSearchResults } from "./views/search";
 import { renderSettings, renderRemoteSourceCard, renderSyncStatus } from "./views/settings";
 import { renderSessionDetail } from "./views/session";
 import { renderCalendarPage, renderIcalFeed, weekMonday } from "./views/calendar";
+import { renderGroupsIndex, renderGroupDetail } from "./views/groups";
+import { createGroup, renameGroup, deleteGroup, assignSession } from "../groups";
 import { escapeHtml } from "./views/helpers";
 import { loadConfig, saveConfig, resolveConfigPath, type RemoteSource } from "../config";
 import type { SyncManager } from "../sync";
@@ -272,6 +274,70 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
       return c.html(`<span class="connection-error">${escapeHtml(error)}</span>`);
     }
     return c.html(`<span class="connection-ok">Connected</span>`);
+  });
+
+  // ──────────────────────────────────────────
+  // Groups
+  // ──────────────────────────────────────────
+
+  app.get("/groups", (c) => {
+    const error = c.req.query("error") || undefined;
+    return c.html(renderLayout("Groups — Engineering Notebook", {
+      body: renderGroupsIndex(db, error),
+      activeTab: "groups",
+    }));
+  });
+
+  app.get("/groups/:id", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const body = isNaN(id) ? null : renderGroupDetail(db, id);
+    if (!body) return c.text("Group not found", 404);
+    return c.html(renderLayout("Group — Engineering Notebook", {
+      body,
+      activeTab: "groups",
+    }));
+  });
+
+  app.post("/groups", async (c) => {
+    const form = await c.req.parseBody();
+    try {
+      createGroup(db, (form.name as string) || "");
+    } catch (err) {
+      return c.html(renderLayout("Groups — Engineering Notebook", {
+        body: renderGroupsIndex(db, String(err instanceof Error ? err.message : err)),
+        activeTab: "groups",
+      }));
+    }
+    return c.redirect("/groups");
+  });
+
+  app.post("/groups/:id/rename", async (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const form = await c.req.parseBody();
+    try {
+      renameGroup(db, id, (form.name as string) || "");
+    } catch (err) {
+      return c.html(renderLayout("Groups — Engineering Notebook", {
+        body: renderGroupsIndex(db, String(err instanceof Error ? err.message : err)),
+        activeTab: "groups",
+      }));
+    }
+    return c.redirect(`/groups/${id}`);
+  });
+
+  app.post("/groups/:id/delete", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!isNaN(id)) deleteGroup(db, id);
+    return c.redirect("/groups");
+  });
+
+  app.post("/sessions/:id/group", async (c) => {
+    const sessionId = c.req.param("id");
+    const form = await c.req.parseBody();
+    const raw = (form.group_id as string) || "";
+    const groupId = raw === "" ? null : parseInt(raw, 10);
+    assignSession(db, sessionId, groupId === null || isNaN(groupId) ? null : groupId);
+    return c.redirect(`/session/${encodeURIComponent(sessionId)}`);
   });
 
   return app;

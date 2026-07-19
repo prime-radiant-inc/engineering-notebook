@@ -193,4 +193,82 @@ describe("server", () => {
       expect(html).toMatch(/href="\/groups"\s+class="active"/);
     });
   });
+
+  describe("Groups routes", () => {
+    function seedSession(id: string) {
+      db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+      db.query(
+        `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+         VALUES (?, 'p', '/tmp/p', '/tmp/s.jsonl', '2026-07-10T00:00:00Z', 3, datetime('now'))`
+      ).run(id);
+    }
+
+    test("GET /groups renders with Groups nav active", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/groups");
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toMatch(/href="\/groups"\s+class="active"/);
+      expect(html).toContain("New group name");
+    });
+
+    test("POST /groups creates a group then redirects", async () => {
+      const app = createApp(db, syncManager);
+      const form = new FormData();
+      form.append("name", "Trading");
+      const res = await app.request("/groups", { method: "POST", body: form });
+      expect(res.status).toBe(302);
+      const rows = db.query("SELECT name FROM groups").all() as { name: string }[];
+      expect(rows.map((r) => r.name)).toContain("Trading");
+    });
+
+    test("POST /groups with duplicate name shows error, not 500", async () => {
+      const app = createApp(db, syncManager);
+      db.query("INSERT INTO groups (name, created_at) VALUES ('Trading', datetime('now'))").run();
+      const form = new FormData();
+      form.append("name", "Trading");
+      const res = await app.request("/groups", { method: "POST", body: form });
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Group name already exists");
+    });
+
+    test("GET /groups/:id lists sessions; 404 for missing", async () => {
+      const app = createApp(db, syncManager);
+      seedSession("s1");
+      const gid = (db.query("INSERT INTO groups (name, created_at) VALUES ('A', datetime('now')) RETURNING id").get() as { id: number }).id;
+      db.query("INSERT INTO session_groups (session_id, group_id, assigned_at) VALUES ('s1', ?, datetime('now'))").run(gid);
+      const ok = await app.request("/groups/" + gid);
+      expect(ok.status).toBe(200);
+      expect(await ok.text()).toContain('href="/session/s1"');
+      const missing = await app.request("/groups/99999");
+      expect(missing.status).toBe(404);
+    });
+
+    test("POST /groups/:id/rename and /delete", async () => {
+      const app = createApp(db, syncManager);
+      const gid = (db.query("INSERT INTO groups (name, created_at) VALUES ('A', datetime('now')) RETURNING id").get() as { id: number }).id;
+      const rf = new FormData(); rf.append("name", "B");
+      const r1 = await app.request("/groups/" + gid + "/rename", { method: "POST", body: rf });
+      expect(r1.status).toBe(302);
+      expect((db.query("SELECT name FROM groups WHERE id = ?").get(gid) as { name: string }).name).toBe("B");
+      const r2 = await app.request("/groups/" + gid + "/delete", { method: "POST", body: new FormData() });
+      expect(r2.status).toBe(302);
+      expect(db.query("SELECT id FROM groups WHERE id = ?").get(gid)).toBeNull();
+    });
+
+    test("POST /sessions/:id/group files and unassigns a session", async () => {
+      const app = createApp(db, syncManager);
+      seedSession("s1");
+      const gid = (db.query("INSERT INTO groups (name, created_at) VALUES ('A', datetime('now')) RETURNING id").get() as { id: number }).id;
+      const assign = new FormData(); assign.append("group_id", String(gid));
+      const r1 = await app.request("/sessions/s1/group", { method: "POST", body: assign });
+      expect(r1.status).toBe(302);
+      expect((db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get() as { group_id: number }).group_id).toBe(gid);
+      const unassign = new FormData(); unassign.append("group_id", "");
+      const r2 = await app.request("/sessions/s1/group", { method: "POST", body: unassign });
+      expect(r2.status).toBe(302);
+      expect(db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get()).toBeNull();
+    });
+  });
 });
