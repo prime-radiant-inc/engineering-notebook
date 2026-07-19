@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
+import { existsSync, readFileSync } from "fs";
 import { inferAssistantDisplayName, inferUserDisplayName, renderConversation } from "./conversation";
 import { escapeHtml } from "./helpers";
 import { listGroups, getSessionGroupId } from "../../groups";
+import { parseTranscript, type TranscriptItem } from "../../transcript";
 
 /**
  * Render a resume command footer with copy button and source path.
@@ -21,11 +23,56 @@ export function renderSessionFooter(sessionId: string, projectPath: string, sour
   return html;
 }
 
+function toggleControls(sessionId: string, showThinking: boolean, showTools: boolean): string {
+  const url = (t: boolean, o: boolean) => {
+    const params: string[] = [];
+    if (t) params.push("thinking=1");
+    if (o) params.push("tools=1");
+    return `/session/${encodeURIComponent(sessionId)}${params.length ? "?" + params.join("&") : ""}`;
+  };
+  const thinkingLink = url(!showThinking, showTools);
+  const toolsLink = url(showThinking, !showTools);
+  return (
+    `<div class="transcript-toggle">` +
+    `<a href="${thinkingLink}">${showThinking ? "Hide thinking" : "Show thinking"}</a>` +
+    `<a href="${toolsLink}">${showTools ? "Hide tools" : "Show tools"}</a>` +
+    `</div>`
+  );
+}
+
+function renderTranscriptItems(items: TranscriptItem[], showThinking: boolean, showTools: boolean): string {
+  let html = "";
+  let hadThinking = false;
+  let hadTool = false;
+  for (const item of items) {
+    if (item.kind === "thinking") { hadThinking = true; if (!showThinking) continue; }
+    if (item.kind === "tool_use" || item.kind === "tool_result") { hadTool = true; if (!showTools) continue; }
+    const who = item.role === "user" ? "User" : "Assistant";
+    if (item.kind === "text") {
+      html += `<div style="margin-bottom:12px;"><div style="font-size:11px; color:var(--text-ghost);">${who}</div><div>${escapeHtml(item.content)}</div></div>`;
+    } else if (item.kind === "thinking") {
+      html += `<div class="transcript-thinking">${escapeHtml(item.content)}</div>`;
+    } else if (item.kind === "tool_use") {
+      html += `<div class="transcript-tool"><div style="font-weight:600;">🛠 ${escapeHtml(item.name || "tool")}</div><pre>${escapeHtml(item.content)}</pre></div>`;
+    } else {
+      html += `<div class="transcript-tool"><div style="font-weight:600;">↳ result</div><pre>${escapeHtml(item.content)}</pre></div>`;
+    }
+  }
+  if ((showThinking && !hadThinking) || (showTools && !hadTool)) {
+    html += `<div style="color:var(--text-ghost); font-style:italic; font-size:12px;">No thinking/tool data for this session.</div>`;
+  }
+  return html;
+}
+
 /**
  * Render a single session's conversation for Panel 3,
  * with basic session metadata header.
  */
-export function renderSessionDetail(db: Database, sessionId: string): string {
+export function renderSessionDetail(
+  db: Database,
+  sessionId: string,
+  opts: { showThinking?: boolean; showTools?: boolean } = {}
+): string {
   const session = db.query(`
     SELECT s.id, s.project_id, s.project_path, s.source_path, s.started_at, s.ended_at, s.git_branch,
            s.message_count, p.display_name, c.conversation_markdown
@@ -64,6 +111,26 @@ export function renderSessionDetail(db: Database, sessionId: string): string {
   html += `</select>`;
   html += `<noscript><button type="submit">Save</button></noscript>`;
   html += `</form>`;
+
+  const showThinking = opts.showThinking ?? false;
+  const showTools = opts.showTools ?? false;
+  html += toggleControls(sessionId, showThinking, showTools);
+
+  if (showThinking || showTools) {
+    if (session.source_path && existsSync(session.source_path)) {
+      try {
+        const { items } = parseTranscript(readFileSync(session.source_path, "utf-8"));
+        html += renderTranscriptItems(items, showThinking, showTools);
+        html += renderSessionFooter(sessionId, session.project_path, session.source_path);
+        return html;
+      } catch {
+        html += `<div class="transcript-warning">Original session file unavailable — can't show thinking/tools.</div>`;
+      }
+    } else {
+      html += `<div class="transcript-warning">Original session file unavailable — can't show thinking/tools.</div>`;
+    }
+    // fall through to text-only render below
+  }
 
   if (session.conversation_markdown) {
     html += renderConversation(

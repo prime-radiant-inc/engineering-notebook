@@ -701,6 +701,12 @@ export function renderLayout(title: string, content: LayoutContent): string {
     }
     a { color: var(--text-muted); }
     a:hover { color: var(--text); }
+
+    .transcript-toggle { display:flex; gap:12px; margin-bottom:14px; font-size:12px; }
+    .transcript-thinking { border-left:2px solid var(--border-subtle); padding:6px 10px; margin:8px 0; color:var(--text-muted); font-style:italic; white-space:pre-wrap; }
+    .transcript-tool { border:1px solid var(--border-subtle); border-radius:4px; padding:8px 10px; margin:8px 0; font-family:monospace; font-size:12px; }
+    .transcript-tool pre { white-space:pre-wrap; margin:4px 0 0; }
+    .transcript-warning { color:#b91c1c; font-size:12px; margin:8px 0; }
   </style>
 </head>
 <body>

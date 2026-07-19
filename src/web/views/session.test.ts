@@ -4,7 +4,7 @@ import { beforeEach, afterEach } from "bun:test";
 import { initDb, closeDb } from "../../db";
 import { createGroup, assignSession } from "../../groups";
 import { renderSessionDetail } from "./session";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -71,5 +71,67 @@ describe("session detail group control", () => {
     assignSession(db, "s1", gid);
     const html = renderSessionDetail(db, "s1");
     expect(html).toMatch(new RegExp(`<option value="${gid}" selected`));
+  });
+});
+
+describe("session detail thinking/tools toggle", () => {
+  let tempDir: string;
+  let db: ReturnType<typeof initDb>;
+
+  const jsonl = [
+    JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "the question" }] } }),
+    JSON.stringify({ type: "assistant", message: { content: [
+      { type: "thinking", thinking: "SECRET_REASONING" },
+      { type: "text", text: "the answer" },
+      { type: "tool_use", name: "Bash", input: { command: "ls" } },
+    ] } }),
+  ].join("\n");
+
+  function seedWithFile(id: string, sourcePath: string) {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES (?, 'p', '/tmp/p', ?, '2026-07-10T00:00:00Z', 2, datetime('now'))`
+    ).run(id, sourcePath);
+    db.query("INSERT INTO conversations (session_id, conversation_markdown, extracted_at) VALUES (?, '# md the answer', datetime('now'))").run(id);
+  }
+
+  beforeEach(() => { tempDir = mkdtempSync(join(tmpdir(), "tt-test-")); db = initDb(join(tempDir, "t.db")); });
+  afterEach(() => { closeDb(); rmSync(tempDir, { recursive: true, force: true }); });
+
+  test("default render shows toggle controls and no thinking/tool content", () => {
+    const src = join(tempDir, "s.jsonl"); writeFileSync(src, jsonl);
+    seedWithFile("s1", src);
+    const html = renderSessionDetail(db, "s1");
+    expect(html).toContain("Show thinking");
+    expect(html).toContain("Show tools");
+    expect(html).not.toContain("SECRET_REASONING");
+  });
+
+  test("showThinking re-parses the file and renders thinking; control flips to Hide", () => {
+    const src = join(tempDir, "s.jsonl"); writeFileSync(src, jsonl);
+    seedWithFile("s1", src);
+    const html = renderSessionDetail(db, "s1", { showThinking: true });
+    expect(html).toContain("SECRET_REASONING");
+    expect(html).toContain("Hide thinking");
+    expect(html).not.toContain('"input"'); // tools not shown
+    expect(html).not.toContain("Bash"); // tool name not shown
+  });
+
+  test("showTools renders tool call, not thinking", () => {
+    const src = join(tempDir, "s.jsonl"); writeFileSync(src, jsonl);
+    seedWithFile("s1", src);
+    const html = renderSessionDetail(db, "s1", { showTools: true });
+    expect(html).toContain("Bash");
+    expect(html).toContain("ls");
+    expect(html).not.toContain("SECRET_REASONING");
+  });
+
+  test("missing source file → warning banner + text-only fallback", () => {
+    seedWithFile("s1", join(tempDir, "gone.jsonl")); // never written
+    const html = renderSessionDetail(db, "s1", { showThinking: true });
+    expect(html).toContain("Original session file unavailable");
+    expect(html).not.toContain("SECRET_REASONING");
+    expect(html).toContain("Hide thinking"); // control still shown
   });
 });
