@@ -4,6 +4,25 @@ export type StructuredFormat = "claude"|"codex"|"unknown";
 
 import { resolveActivePath } from "./message-tree";
 
+/**
+ * A user message that is purely command *output* (<local-command-stdout>…</…>)
+ * is machine-generated noise, not a user turn — hide it (both here and in the
+ * ported claude-session-viewer).
+ */
+export function isCommandOutputMessage(content: unknown): boolean {
+  const strip = (t: string) => t.replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "").trim();
+  if (typeof content === "string") {
+    const t = content.trim();
+    return /<local-command-stdout>/.test(t) && strip(t) === "";
+  }
+  if (Array.isArray(content)) {
+    if (content.some((b: any) => b && typeof b === "object" && b.type && b.type !== "text")) return false;
+    const text = content.map((b: any) => (b && b.type === "text" && typeof b.text === "string" ? b.text : "")).join("\n").trim();
+    return /<local-command-stdout>/.test(text) && strip(text) === "";
+  }
+  return false;
+}
+
 function resultToString(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.map((b:any)=> b && typeof b==="object" && typeof b.text==="string" ? b.text : JSON.stringify(b)).join("\n");
@@ -43,6 +62,7 @@ export function parseStructuredTranscript(jsonlText: string): { messages: Struct
     if (rec?.message == null) continue;
     const role = rec.type as "user"|"assistant";
     const content = rec.message.content;
+    if (role === "user" && isCommandOutputMessage(content)) continue; // command output, not a user turn
     const blocks: StructuredBlock[] = [];
     if (typeof content === "string") {
       if (content && content!=="(no content)") blocks.push({ kind:"text", content });

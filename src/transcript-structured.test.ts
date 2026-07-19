@@ -48,3 +48,14 @@ test("bridges parent chains through filtered (isMeta/summary) records", () => {
   // 'b' bridges through the summary record 's' to parent 'a' -> single path a,b
   expect(messages.map((m) => m.uuid)).toEqual(["a", "b"]);
 });
+
+test("hides user messages that are purely local-command-stdout (command output)", () => {
+  const lines = [
+    JSON.stringify({ type:"user", uuid:"u1", parentUuid:null, timestamp:"t1", message:{content:"real prompt"} }),
+    JSON.stringify({ type:"user", uuid:"u2", parentUuid:"u1", timestamp:"t2", message:{content:"<local-command-stdout>Successfully added</local-command-stdout>"} }),
+    JSON.stringify({ type:"assistant", uuid:"u3", parentUuid:"u2", timestamp:"t3", message:{content:[{type:"text",text:"ok"}]} }),
+  ].join("\n");
+  const { messages } = parseStructuredTranscript(lines);
+  // u2 (command output) is dropped; u3 bridges through it to u1 → path u1,u3
+  expect(messages.map((m) => m.uuid)).toEqual(["u1", "u3"]);
+});
