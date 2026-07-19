@@ -56,6 +56,7 @@ export type SessionMeta = {
   message_count: number;
   git_branch: string | null;
   title: string | null;
+  title_source: "desktop" | "user" | "generated" | null;
   subagents: Subagent[];
 };
 

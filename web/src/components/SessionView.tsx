@@ -30,7 +30,7 @@ export function SessionView({ id }: { id: string }) {
   return (
     <div className="max-w-4xl">
       <div className="mb-6">
-        <h1 className="heading-display text-xl mb-2 break-words">{firstPrompt || "Session"}</h1>
+        <h1 className="heading-display text-xl mb-2 break-words">{meta?.title || firstPrompt || "Session"}</h1>
         <div className="flex items-center gap-4 text-xs text-slate flex-wrap">
           {meta?.git_branch && <span className="bg-panel px-1.5 py-0.5 rounded">{meta.git_branch}</span>}
           {data && <span>{messages.length} messages</span>}

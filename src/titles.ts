@@ -36,9 +36,12 @@ export function applyDesktopTitles(db: Database, titles: DesktopTitle[] = readDe
   let applied = 0;
   const tx = db.transaction(() => {
     for (const t of titles) {
+      // User-edited Desktop titles are sticky; auto ('desktop') and 'generated'
+      // titles refresh. An incoming user-edit always wins.
       const res = db.query(
         `UPDATE sessions SET title = ?, title_source = ?
-         WHERE id = ? AND (title IS NULL OR title_source = 'generated' OR title_source IS NULL OR ? = 'user')`
+         WHERE id = ?
+           AND (title IS NULL OR title_source IS NULL OR title_source IN ('generated', 'desktop') OR ? = 'user')`
       ).run(t.title, t.source, t.cliSessionId, t.source);
       if (res.changes > 0) applied++;
     }

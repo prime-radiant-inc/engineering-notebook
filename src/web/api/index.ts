@@ -112,7 +112,7 @@ export function createApiRouter(db: Database): Hono {
 
   api.get("/sessions/:id", (c) => {
     const id = c.req.param("id");
-    const row = db.query("SELECT id, project_id, project_path, source_path, started_at, ended_at, message_count, git_branch, title FROM sessions WHERE id = ?").get(id) as any;
+    const row = db.query("SELECT id, project_id, project_path, source_path, started_at, ended_at, message_count, git_branch, title, title_source FROM sessions WHERE id = ?").get(id) as any;
     if (!row) return c.json({ error: "session not found" }, 404);
     const subagents = row.source_path ? discoverSubagents(dirname(row.source_path), id) : [];
     return c.json({ ...row, subagents });

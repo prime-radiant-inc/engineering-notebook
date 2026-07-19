@@ -18,7 +18,7 @@ describe("SessionView (ported viewer)", () => {
 
   const meta: api.SessionMeta = {
     id: "s1", project_id: "proj", project_path: "/p", source_path: "/p/s1.jsonl",
-    started_at: "2026-07-10T00:00:00Z", ended_at: null, message_count: 3, git_branch: null, title: null,
+    started_at: "2026-07-10T00:00:00Z", ended_at: null, message_count: 3, git_branch: null, title: null, title_source: null,
     subagents: [{ agentId: "ag1", description: "do a thing", agentType: "general-purpose", toolUseId: "tu1", spawnDepth: 1 }],
   };
   const transcript: api.Transcript = {
