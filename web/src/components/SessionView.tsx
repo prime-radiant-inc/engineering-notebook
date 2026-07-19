@@ -36,7 +36,7 @@ export function SessionView({ id }: { id: string }) {
         <h1 className="heading-display text-xl mb-2 break-words">{firstPrompt || "Session"}</h1>
         <div className="flex items-center gap-4 text-xs text-slate flex-wrap">
           {meta?.git_branch && <span className="bg-panel px-1.5 py-0.5 rounded">{meta.git_branch}</span>}
-          {meta && <span>{meta.message_count} messages</span>}
+          {data && <span>{messages.length} messages</span>}
           {meta && meta.subagents.length > 0 && (
             <span className="text-teal">{meta.subagents.length} subagent{meta.subagents.length !== 1 ? "s" : ""}</span>
           )}
