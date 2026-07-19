@@ -166,6 +166,7 @@ export function createApiRouter(db: Database): Hono {
         headline: e.headline, summary: e.summary,
         topics: parse(e.topics), open_questions: parse(e.open_questions),
         session_ids: parse(e.session_ids),
+        sessions: resolveSessionTitles(db, parse(e.session_ids)),
       })),
     });
   });
