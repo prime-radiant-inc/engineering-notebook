@@ -4,7 +4,9 @@ import { createBrowserRouter, RouterProvider, Outlet, useParams } from "react-ro
 import "./index.css";
 import { AppShell } from "./components/AppShell";
 import Journal from "./pages/Journal";
-import Placeholder from "./pages/Placeholder";
+import Projects from "./pages/Projects";
+import Calendar from "./pages/Calendar";
+import Groups from "./pages/Groups";
 import { SessionView } from "./components/SessionView";
 
 function SessionRoute() {
@@ -25,9 +27,9 @@ const router = createBrowserRouter([
     ),
     children: [
       { path: "/", element: <Journal /> },
-      { path: "/projects", element: <Placeholder title="Projects" /> },
-      { path: "/calendar", element: <Placeholder title="Calendar" /> },
-      { path: "/groups", element: <Placeholder title="Groups" /> },
+      { path: "/projects", element: <Projects /> },
+      { path: "/calendar", element: <Calendar /> },
+      { path: "/groups", element: <Groups /> },
       { path: "/s/:id", element: <SessionRoute /> },
     ],
   },

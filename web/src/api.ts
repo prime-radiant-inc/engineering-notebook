@@ -113,3 +113,32 @@ export function getJournalDates(): Promise<{ dates: JournalDate[] }> {
 export function getJournalEntries(date: string): Promise<{ entries: JournalEntry[] }> {
   return getJson<{ entries: JournalEntry[] }>(`/api/journal/entries?date=${encodeURIComponent(date)}`);
 }
+
+export type ProjectRow = { id: string; display_name: string; last_session_at: string | null; session_count: number };
+export function getProjects(): Promise<{ projects: ProjectRow[] }> {
+  return getJson("/api/projects");
+}
+export function getProjectEntries(id: string): Promise<{ entries: JournalEntry[] }> {
+  return getJson(`/api/projects/${encodeURIComponent(id)}/entries`);
+}
+
+export type CalendarDay = { date: string; entries: number; projects: string[] };
+export function getCalendar(month: string): Promise<{ days: CalendarDay[] }> {
+  return getJson(`/api/calendar?month=${encodeURIComponent(month)}`);
+}
+
+export type GroupRow = { id: number; name: string; sessionCount: number; lastActivityAt: string | null };
+export type GroupSessionRow = { id: string; display_name: string; project_id: string; started_at: string; message_count: number };
+export function getGroups(): Promise<{ groups: GroupRow[]; desktopRunning: boolean }> {
+  return getJson("/api/groups");
+}
+export function getGroup(id: number): Promise<{ group: { id: number; name: string }; sessions: GroupSessionRow[] }> {
+  return getJson(`/api/groups/${id}`);
+}
+export function getUngrouped(): Promise<{ sessions: GroupSessionRow[]; total: number }> {
+  return getJson("/api/groups/ungrouped");
+}
+export async function importDesktopGroups(): Promise<{ imported: boolean; summary?: Record<string, number>; message?: string; error?: string }> {
+  const res = await fetch("/api/groups/import-desktop", { method: "POST" });
+  return res.json();
+}

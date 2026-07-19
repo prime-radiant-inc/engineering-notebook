@@ -92,6 +92,16 @@ export function initDb(dbPath: string): Database {
   } catch {
     // Column already exists — ignore
   }
+  try {
+    db.exec(`ALTER TABLE groups ADD COLUMN desktop_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_desktop_id ON groups(desktop_id) WHERE desktop_id IS NOT NULL`);
+  } catch {
+    // Index already exists — ignore
+  }
 
   _db = db;
   return db;

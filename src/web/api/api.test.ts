@@ -267,4 +267,71 @@ describe("api router", () => {
     const neg = (await (await app.request("/sessions?limit=-1")).json()) as any;
     expect(neg.sessions.length).toBe(0);
   });
+
+  function seedJournal() {
+    db.query("INSERT INTO projects (id, path, display_name, last_session_at, session_count) VALUES ('p','/tmp/p','My Project','2026-07-15T00:00:00Z',2)").run();
+    db.query(`INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+              VALUES ('2026-07-15','p','["s1"]','Built it','did work','["infra"]','["next?"]',datetime('now'),'m')`).run();
+  }
+
+  test("GET /projects and /projects/:id/entries", async () => {
+    seedJournal();
+    const app = createApiRouter(db);
+    const projects = (await (await app.request("/projects")).json()) as any;
+    expect(projects.projects[0]).toMatchObject({ id: "p", display_name: "My Project" });
+    const entries = (await (await app.request("/projects/p/entries")).json()) as any;
+    expect(entries.entries[0]).toMatchObject({ headline: "Built it", topics: ["infra"], session_ids: ["s1"] });
+  });
+
+  test("GET /calendar returns per-date activity for a month", async () => {
+    seedJournal();
+    const app = createApiRouter(db);
+    const cal = (await (await app.request("/calendar?month=2026-07")).json()) as any;
+    expect(cal.days).toEqual([{ date: "2026-07-15", entries: 1, projects: ["My Project"] }]);
+  });
+
+  test("GET /groups, /groups/ungrouped, /groups/:id", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('s1','p','/tmp/p','/tmp/s.jsonl','2026-07-10T00:00:00Z',3,datetime('now'))`).run();
+    const gid = (db.query("INSERT INTO groups (name, created_at) VALUES ('Trading', datetime('now')) RETURNING id").get() as any).id;
+    const app = createApiRouter(db);
+
+    const groups = (await (await app.request("/groups")).json()) as any;
+    expect(groups.groups.map((g: any) => g.name)).toContain("Trading");
+
+    const ung = (await (await app.request("/groups/ungrouped")).json()) as any;
+    expect(ung.total).toBe(1);
+    expect(ung.sessions[0].id).toBe("s1");
+
+    const detail = (await (await app.request(`/groups/${gid}`)).json()) as any;
+    expect(detail.group.name).toBe("Trading");
+    expect((await app.request("/groups/99999")).status).toBe(404);
+  });
+});
+
+import { importDesktopGroups } from "../../groups";
+describe("importDesktopGroups reconcile", () => {
+  let tempDir: string, db: ReturnType<typeof initDb>;
+  beforeEach(() => { tempDir = mkdtempSync(join(tmpdir(), "imp-")); db = initDb(join(tempDir, "t.db")); });
+  afterEach(() => { closeDb(); rmSync(tempDir, { recursive: true, force: true }); });
+
+  test("creates desktop groups by desktop_id, assigns existing sessions, skips missing", () => {
+    db.query("INSERT INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('cli1','p','/tmp/p','/tmp/s.jsonl','2026-07-10T00:00:00Z',3,datetime('now'))`).run();
+    const summary = importDesktopGroups(db, {
+      groups: [{ desktopId: "cg-1", name: "Tolaria" }, { desktopId: "cg-2", name: "OpenBB" }],
+      assignments: [{ cliSessionId: "cli1", desktopGroupId: "cg-1" }, { cliSessionId: "missing", desktopGroupId: "cg-2" }],
+    });
+    expect(summary.groupsAdded).toBe(2);
+    expect(summary.sessionsAssigned).toBe(1);
+    expect(summary.skippedNoSession).toBe(1);
+    const tol = db.query("SELECT id FROM groups WHERE desktop_id='cg-1'").get() as { id: number };
+    expect((db.query("SELECT group_id FROM session_groups WHERE session_id='cli1'").get() as any).group_id).toBe(tol.id);
+    // idempotent + removes dropped desktop group
+    const s2 = importDesktopGroups(db, { groups: [{ desktopId: "cg-1", name: "Tolaria" }], assignments: [{ cliSessionId: "cli1", desktopGroupId: "cg-1" }] });
+    expect(s2.groupsRemoved).toBe(1);
+    expect(db.query("SELECT id FROM groups WHERE desktop_id='cg-2'").get()).toBeNull();
+  });
 });

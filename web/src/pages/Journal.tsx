@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { getJournalDates, getJournalEntries, type JournalDate, type JournalEntry } from "../api";
 import { ThreePanel } from "../components/AppShell";
 import { SessionView } from "../components/SessionView";
@@ -8,6 +9,8 @@ function fmtDate(iso: string): string {
 }
 
 export default function Journal() {
+  const [searchParams] = useSearchParams();
+  const urlDate = searchParams.get("date");
   const [dates, setDates] = useState<JournalDate[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -19,11 +22,18 @@ export default function Journal() {
     getJournalDates()
       .then((d) => {
         setDates(d.dates);
-        if (d.dates[0]) setDate(d.dates[0].date);
+        setDate(urlDate && d.dates.some((x) => x.date === urlDate) ? urlDate : d.dates[0]?.date ?? null);
       })
       .catch((e) => setDatesError(String(e.message ?? e)))
       .finally(() => setLoadingDates(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Follow a ?date= change coming from the Calendar.
+  useEffect(() => {
+    if (urlDate && dates.some((x) => x.date === urlDate)) setDate(urlDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlDate]);
 
   useEffect(() => {
     if (!date) { setEntries([]); return; }

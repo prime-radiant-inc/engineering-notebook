@@ -106,3 +106,81 @@ export function getGroupWithSessions(
     .all(id) as GroupSessionRow[];
   return { group, sessions };
 }
+
+import type { DesktopGroupsData } from "./desktop-groups";
+
+export type ImportSummary = {
+  groupsAdded: number;
+  groupsRenamed: number;
+  groupsRemoved: number;
+  sessionsAssigned: number;
+  skippedNoSession: number;
+  skippedNameCollision: number;
+};
+
+/** Import Claude Desktop groups: mirror by desktop_id; notebook-made groups untouched. */
+export function importDesktopGroups(db: Database, data: DesktopGroupsData): ImportSummary {
+  const summary: ImportSummary = {
+    groupsAdded: 0, groupsRenamed: 0, groupsRemoved: 0,
+    sessionsAssigned: 0, skippedNoSession: 0, skippedNameCollision: 0,
+  };
+
+  db.transaction(() => {
+    const desktopIdToGroupId = new Map<string, number>();
+
+    for (const g of data.groups) {
+      const existing = db.query("SELECT id, name FROM groups WHERE desktop_id = ?").get(g.desktopId) as
+        | { id: number; name: string } | null;
+      if (existing) {
+        if (existing.name !== g.name) {
+          const clash = db.query("SELECT id FROM groups WHERE name = ? AND id != ?").get(g.name, existing.id) as { id: number } | null;
+          if (!clash) { db.query("UPDATE groups SET name = ? WHERE id = ?").run(g.name, existing.id); summary.groupsRenamed++; }
+        }
+        desktopIdToGroupId.set(g.desktopId, existing.id);
+      } else {
+        const clash = db.query("SELECT id FROM groups WHERE name = ?").get(g.name) as { id: number } | null;
+        if (clash) { summary.skippedNameCollision++; continue; }
+        const row = db.query(
+          "INSERT INTO groups (name, created_at, desktop_id) VALUES (?, datetime('now'), ?) RETURNING id"
+        ).get(g.name, g.desktopId) as { id: number };
+        desktopIdToGroupId.set(g.desktopId, row.id);
+        summary.groupsAdded++;
+      }
+    }
+
+    const present = new Set(data.groups.map((g) => g.desktopId));
+    for (const eg of db.query("SELECT id, desktop_id FROM groups WHERE desktop_id IS NOT NULL").all() as { id: number; desktop_id: string }[]) {
+      if (!present.has(eg.desktop_id)) { db.query("DELETE FROM groups WHERE id = ?").run(eg.id); summary.groupsRemoved++; }
+    }
+
+    // Mirror membership for desktop groups.
+    db.query("DELETE FROM session_groups WHERE group_id IN (SELECT id FROM groups WHERE desktop_id IS NOT NULL)").run();
+    for (const a of data.assignments) {
+      const gid = desktopIdToGroupId.get(a.desktopGroupId);
+      if (gid === undefined) continue;
+      const sess = db.query("SELECT id FROM sessions WHERE id = ?").get(a.cliSessionId);
+      if (!sess) { summary.skippedNoSession++; continue; }
+      db.query(
+        `INSERT INTO session_groups (session_id, group_id, assigned_at) VALUES (?, ?, datetime('now'))
+         ON CONFLICT(session_id) DO UPDATE SET group_id = excluded.group_id, assigned_at = excluded.assigned_at`
+      ).run(a.cliSessionId, gid);
+      summary.sessionsAssigned++;
+    }
+  })();
+
+  return summary;
+}
+
+/** Sessions with no group, most-recent first. */
+export function listUngroupedSessions(db: Database, limit = 200, offset = 0): { sessions: GroupSessionRow[]; total: number } {
+  const total = (db.query(
+    `SELECT COUNT(*) c FROM sessions s WHERE NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)`
+  ).get() as { c: number }).c;
+  const sessions = db.query(
+    `SELECT s.id, p.display_name, s.project_id, s.started_at, s.message_count
+     FROM sessions s JOIN projects p ON p.id = s.project_id
+     WHERE NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)
+     ORDER BY s.started_at DESC LIMIT ? OFFSET ?`
+  ).all(limit, offset) as GroupSessionRow[];
+  return { sessions, total };
+}

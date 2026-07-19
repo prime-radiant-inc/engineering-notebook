@@ -4,11 +4,78 @@ import { existsSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { parseStructuredTranscript } from "../../transcript-structured";
 import { discoverSubagents, subagentFilePath } from "../../subagents";
+import { listGroups, getGroupWithSessions, listUngroupedSessions, importDesktopGroups } from "../../groups";
+import { readDesktopGroups, isClaudeDesktopRunning } from "../../desktop-groups";
 
 /** JSON API consumed by the React frontend (mounted at /api). */
 export function createApiRouter(db: Database): Hono {
   const api = new Hono();
   api.get("/ping", (c) => c.json({ ok: true }));
+
+  // ── Projects ──
+  api.get("/projects", (c) => {
+    const rows = db.query(
+      `SELECT id, display_name, last_session_at, session_count FROM projects ORDER BY last_session_at DESC`
+    ).all();
+    return c.json({ projects: rows });
+  });
+
+  api.get("/projects/:id/entries", (c) => {
+    const id = c.req.param("id");
+    const parse = (s: string) => { try { return JSON.parse(s || "[]"); } catch { return []; } };
+    const rows = db.query(
+      `SELECT je.id, je.date, je.headline, je.summary, je.topics, je.session_ids, je.open_questions
+       FROM journal_entries je WHERE je.project_id = ? AND je.headline != '' ORDER BY je.date DESC`
+    ).all(id) as any[];
+    return c.json({
+      entries: rows.map((e) => ({
+        id: e.id, date: e.date, headline: e.headline, summary: e.summary,
+        topics: parse(e.topics), open_questions: parse(e.open_questions), session_ids: parse(e.session_ids),
+      })),
+    });
+  });
+
+  // ── Calendar ── activity per date for a month (YYYY-MM)
+  api.get("/calendar", (c) => {
+    const month = c.req.query("month"); // YYYY-MM
+    const where = month ? "WHERE je.date LIKE ? AND je.headline != ''" : "WHERE je.headline != ''";
+    const args = month ? [`${month}-%`] : [];
+    const rows = db.query(
+      `SELECT je.date AS date, COUNT(*) AS entries, GROUP_CONCAT(DISTINCT p.display_name) AS projects
+       FROM journal_entries je JOIN projects p ON je.project_id = p.id ${where}
+       GROUP BY je.date ORDER BY je.date`
+    ).all(...args) as { date: string; entries: number; projects: string }[];
+    return c.json({
+      days: rows.map((r) => ({ date: r.date, entries: r.entries, projects: (r.projects || "").split(",").map((s) => s.trim()).filter(Boolean) })),
+    });
+  });
+
+  // ── Groups ──
+  api.get("/groups", (c) => c.json({ groups: listGroups(db), desktopRunning: isClaudeDesktopRunning() }));
+
+  api.get("/groups/ungrouped", (c) => {
+    const limit = Math.max(0, Math.min(parseInt(c.req.query("limit") || "200", 10) || 200, 500));
+    const offset = Math.max(0, parseInt(c.req.query("offset") || "0", 10) || 0);
+    return c.json(listUngroupedSessions(db, limit, offset));
+  });
+
+  api.get("/groups/:id", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const data = isNaN(id) ? null : getGroupWithSessions(db, id);
+    if (!data) return c.json({ error: "group not found" }, 404);
+    return c.json(data);
+  });
+
+  api.post("/groups/import-desktop", async (c) => {
+    try {
+      const data = await readDesktopGroups();
+      if (!data) return c.json({ imported: false, message: "No Claude Desktop groups found." });
+      const summary = importDesktopGroups(db, data);
+      return c.json({ imported: true, summary });
+    } catch (err) {
+      return c.json({ imported: false, error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
 
   api.get("/sessions/:id/transcript", (c) => {
     const id = c.req.param("id");
