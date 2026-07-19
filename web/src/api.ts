@@ -88,3 +88,24 @@ export function getTranscript(id: string): Promise<Transcript> {
 export function getSubagent(sessionId: string, agentId: string): Promise<Transcript> {
   return getJson<Transcript>(`/api/subagent/${encodeURIComponent(sessionId)}/${encodeURIComponent(agentId)}`);
 }
+
+export type JournalDate = { date: string; projects: string[] };
+export type JournalEntry = {
+  id: number;
+  date: string;
+  project_id: string;
+  display_name: string;
+  headline: string;
+  summary: string;
+  topics: string[];
+  open_questions: string[];
+  session_ids: string[];
+};
+
+export function getJournalDates(): Promise<{ dates: JournalDate[] }> {
+  return getJson<{ dates: JournalDate[] }>("/api/journal/dates");
+}
+
+export function getJournalEntries(date: string): Promise<{ entries: JournalEntry[] }> {
+  return getJson<{ entries: JournalEntry[] }>(`/api/journal/entries?date=${encodeURIComponent(date)}`);
+}

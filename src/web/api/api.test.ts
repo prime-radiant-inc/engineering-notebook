@@ -17,6 +17,29 @@ describe("api router", () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
+  test("GET /journal/dates and /journal/entries return summarized entries", async () => {
+    db.query("INSERT INTO projects (id, path, display_name) VALUES ('p','/tmp/p','My Project')").run();
+    db.query(`INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+              VALUES ('2026-07-15','p','[\"s1\",\"s2\"]','Built the thing','Did a lot','[\"infra\",\"api\"]','[\"what next?\"]',datetime('now'),'m')`).run();
+    // an empty-headline entry must be excluded
+    db.query(`INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+              VALUES ('2026-07-14','p','[]','','skip me','[]','[]',datetime('now'),'m')`).run();
+    const app = createApiRouter(db);
+
+    const dates = (await (await app.request("/journal/dates")).json()) as any;
+    expect(dates.dates).toEqual([{ date: "2026-07-15", projects: ["My Project"] }]);
+
+    const entries = (await (await app.request("/journal/entries?date=2026-07-15")).json()) as any;
+    expect(entries.entries).toHaveLength(1);
+    expect(entries.entries[0]).toMatchObject({
+      headline: "Built the thing", summary: "Did a lot",
+      topics: ["infra", "api"], open_questions: ["what next?"], session_ids: ["s1", "s2"],
+    });
+
+    const missing = await app.request("/journal/entries");
+    expect(missing.status).toBe(400);
+  });
+
   test("GET /sessions/:id/transcript returns structured messages", async () => {
     const sourcePath = join(tempDir, "session.jsonl");
     writeFileSync(sourcePath, [

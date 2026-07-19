@@ -43,6 +43,41 @@ export function createApiRouter(db: Database): Hono {
     return c.json({ sessions, total });
   });
 
+  // Journal: dates that have summarized entries (panel 1)
+  api.get("/journal/dates", (c) => {
+    const rows = db.query(`
+      SELECT je.date AS date, GROUP_CONCAT(DISTINCT p.display_name) AS projects
+      FROM journal_entries je JOIN projects p ON je.project_id = p.id
+      WHERE je.headline != ''
+      GROUP BY je.date ORDER BY je.date DESC
+    `).all() as { date: string; projects: string }[];
+    return c.json({
+      dates: rows.map((r) => ({ date: r.date, projects: (r.projects || "").split(",").map((s) => s.trim()).filter(Boolean) })),
+    });
+  });
+
+  // Journal: entries (Claude summaries) for a date (panel 2)
+  api.get("/journal/entries", (c) => {
+    const date = c.req.query("date");
+    if (!date) return c.json({ error: "missing date" }, 400);
+    const rows = db.query(`
+      SELECT je.id, je.date, je.project_id, p.display_name, je.headline, je.summary,
+             je.topics, je.session_ids, je.open_questions
+      FROM journal_entries je JOIN projects p ON je.project_id = p.id
+      WHERE je.date = ? AND je.headline != ''
+      ORDER BY p.display_name
+    `).all(date) as any[];
+    const parse = (s: string) => { try { return JSON.parse(s || "[]"); } catch { return []; } };
+    return c.json({
+      entries: rows.map((e) => ({
+        id: e.id, date: e.date, project_id: e.project_id, display_name: e.display_name,
+        headline: e.headline, summary: e.summary,
+        topics: parse(e.topics), open_questions: parse(e.open_questions),
+        session_ids: parse(e.session_ids),
+      })),
+    });
+  });
+
   api.get("/subagent/:sessionId/:agentId", (c) => {
     const { sessionId, agentId } = c.req.param();
     const idPattern = /^[A-Za-z0-9_-]+$/;
