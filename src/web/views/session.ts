@@ -60,7 +60,10 @@ function renderTranscriptItems(items: TranscriptItem[], showThinking: boolean, s
       resultsByToolUseId.set(it.toolUseId, it.content);
     }
   }
-  const consumed = new Set<string>();
+  const toolUseIds = new Set<string>();
+  for (const it of items) {
+    if (it.kind === "tool_use" && it.id) toolUseIds.add(it.id);
+  }
 
   let html = "";
   let hadThinking = false;
@@ -82,14 +85,13 @@ function renderTranscriptItems(items: TranscriptItem[], showThinking: boolean, s
       const body = escapeHtml(item.input ? JSON.stringify(item.input, null, 2) : item.content);
       let resultHtml = "";
       if (item.id && resultsByToolUseId.has(item.id)) {
-        consumed.add(item.id);
         resultHtml = `<div class="tool-result"><pre>${escapeHtml(resultsByToolUseId.get(item.id)!)}</pre></div>`;
       }
       html += `<details class="transcript-tool"><summary><span class="tool-name">${escapeHtml(item.name || "tool")}</span>` +
         (preview ? `<span class="tool-preview">${escapeHtml(preview)}</span>` : "") +
         `</summary><pre>${body}</pre>${resultHtml}</details>`;
     } else { // tool_result
-      if (item.toolUseId && consumed.has(item.toolUseId)) continue; // already shown inside its tool_use
+      if (item.toolUseId && toolUseIds.has(item.toolUseId)) continue; // paired inside its tool_use (any order)
       html += `<div class="transcript-tool" style="display:block;"><div style="font-weight:600; color:var(--text-muted);">&#8627; result</div><pre>${escapeHtml(item.content)}</pre></div>`;
     }
   }

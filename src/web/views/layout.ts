@@ -706,7 +706,7 @@ export function renderLayout(title: string, content: LayoutContent): string {
     .transcript-toggle { display:flex; gap:12px; margin-bottom:14px; font-size:12px; }
     .transcript-thinking { background:var(--surface); border-radius:14px 14px 14px 4px; padding:10px 14px; margin:8px 0; color:var(--text-muted); font-style:italic; font-size:12px; white-space:pre-wrap; }
     .transcript-thinking .tokens { display:block; text-align:right; font-size:10px; color:var(--text-ghost); font-style:normal; margin-top:6px; }
-    details.transcript-tool { border:1px solid var(--border); border-radius:10px; padding:6px 10px; margin:8px 0; font-size:12px; }
+    .transcript-tool { border:1px solid var(--border); border-radius:10px; padding:6px 10px; margin:8px 0; font-size:12px; }
     details.transcript-tool > summary { cursor:pointer; list-style:none; color:var(--text-muted); }
     details.transcript-tool > summary::-webkit-details-marker { display:none; }
     .transcript-tool .tool-name { color:var(--accent); font-weight:600; font-family:var(--font-sans); }

@@ -187,6 +187,22 @@ describe("session detail thinking/tools toggle", () => {
     expect((html.match(/RESULT_PAYLOAD/g) || []).length).toBe(1); // not duplicated standalone
   });
 
+  test("tool_result appearing before its tool_use in file order is not duplicated", () => {
+    const src = join(tempDir, "tool-reversed.jsonl");
+    writeFileSync(src, [
+      JSON.stringify({ type: "user", message: { content: [
+        { type: "tool_result", tool_use_id: "tu_9", content: "REVERSED_PAYLOAD" },
+      ] } }),
+      JSON.stringify({ type: "assistant", message: { content: [
+        { type: "tool_use", id: "tu_9", name: "Bash", input: { command: "ls -la /tmp" } },
+      ] } }),
+    ].join("\n"));
+    seedWithFile("s1", src);
+    const html = renderSessionDetail(db, "s1", { showTools: true });
+    expect((html.match(/REVERSED_PAYLOAD/g) || []).length).toBe(1); // not duplicated
+    expect(html).toContain("<details class=\"transcript-tool\""); // still paired, not standalone
+  });
+
   test("long thinking shows a token estimate", () => {
     const src = join(tempDir, "think.jsonl");
     const long = "x".repeat(400);
