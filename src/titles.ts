@@ -90,6 +90,7 @@ export async function backfillTitles(db: Database, opts: { limit?: number; onPro
   const rows = db.query(
     `SELECT s.id FROM sessions s
      WHERE (s.title IS NULL OR s.title = '')
+       AND COALESCE(s.is_subagent, 0) = 0
        AND EXISTS (SELECT 1 FROM conversations c WHERE c.session_id = s.id AND c.conversation_markdown != '')
      ORDER BY s.started_at DESC ${opts.limit ? "LIMIT " + Math.max(0, opts.limit | 0) : ""}`
   ).all() as { id: string }[];
