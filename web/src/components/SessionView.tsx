@@ -25,20 +25,28 @@ export function SessionView({ id }: { id: string }) {
 
   const messages = useMemo(() => (data ? toParsedMessages(data.messages) : []), [data]);
   const subagentMap = useMemo(() => (meta ? toSubagentMap(meta.subagents) : {}), [meta]);
+  const firstPrompt = useMemo(() => {
+    for (const m of messages) {
+      if (m.type !== "user" || m.isToolResult) continue;
+      const text = m.content.find((b) => b.type === "text");
+      if (text && text.type === "text" && text.text.trim()) return text.text.trim();
+    }
+    return "";
+  }, [messages]);
 
   const toggleCls = (active: boolean) =>
-    `px-1.5 py-0.5 rounded text-xs transition-colors ${active ? "bg-panel text-slate hover:text-ink" : "bg-teal-wash text-teal hover:text-ink"}`;
+    `px-1.5 py-0.5 rounded transition-colors ${active ? "bg-panel text-slate hover:text-ink" : "bg-teal-wash text-teal hover:text-ink"}`;
 
   return (
-    <div className="max-w-3xl">
-      <div className="flex items-center gap-2 mb-4 flex-wrap sticky top-0 bg-white/90 backdrop-blur py-1 z-10">
-        {meta && (
-          <span className="text-xs text-slate/70">
-            {meta.message_count} messages
-            {meta.subagents.length > 0 && ` · ${meta.subagents.length} subagent${meta.subagents.length === 1 ? "" : "s"}`}
-          </span>
-        )}
-        <div className="flex gap-2 ml-auto">
+    <div className="max-w-4xl">
+      <div className="mb-6">
+        <h1 className="heading-display text-xl mb-2 break-words">{firstPrompt || "Session"}</h1>
+        <div className="flex items-center gap-4 text-xs text-slate flex-wrap">
+          {meta?.git_branch && <span className="bg-panel px-1.5 py-0.5 rounded">{meta.git_branch}</span>}
+          {meta && <span>{meta.message_count} messages</span>}
+          {meta && meta.subagents.length > 0 && (
+            <span className="text-teal">{meta.subagents.length} subagent{meta.subagents.length !== 1 ? "s" : ""}</span>
+          )}
           <button className={toggleCls(showThinking)} onClick={() => setShowThinking((v) => !v)}>
             {showThinking ? "Hide thinking" : "Show thinking"}
           </button>

@@ -17,7 +17,7 @@ describe("Journal (3-panel)", () => {
     });
     vi.spyOn(api, "getSession").mockResolvedValue({
       id: "s1", project_id: "p", project_path: "/p", source_path: "/p/s1.jsonl",
-      started_at: "2026-07-15T00:00:00Z", ended_at: null, message_count: 1, subagents: [],
+      started_at: "2026-07-15T00:00:00Z", ended_at: null, message_count: 1, git_branch: null, subagents: [],
     });
     vi.spyOn(api, "getTranscript").mockResolvedValue({ format: "claude", messages: [{ role: "assistant", blocks: [{ kind: "text", content: "TRANSCRIPT_TEXT" }] }] });
 

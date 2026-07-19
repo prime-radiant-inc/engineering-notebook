@@ -52,6 +52,7 @@ export type SessionMeta = {
   started_at: string;
   ended_at: string | null;
   message_count: number;
+  git_branch: string | null;
   subagents: Subagent[];
 };
 
