@@ -28,7 +28,7 @@ function toggleControls(sessionId: string, showThinking: boolean, showTools: boo
     const params: string[] = [];
     if (t) params.push("thinking=1");
     if (o) params.push("tools=1");
-    return `/session/${encodeURIComponent(sessionId)}${params.length ? "?" + params.join("&") : ""}`;
+    return `/session/${encodeURIComponent(sessionId)}${params.length ? "?" + params.join("&amp;") : ""}`;
   };
   const thinkingLink = url(!showThinking, showTools);
   const toolsLink = url(showThinking, !showTools);
@@ -58,8 +58,11 @@ function renderTranscriptItems(items: TranscriptItem[], showThinking: boolean, s
       html += `<div class="transcript-tool"><div style="font-weight:600;">↳ result</div><pre>${escapeHtml(item.content)}</pre></div>`;
     }
   }
-  if ((showThinking && !hadThinking) || (showTools && !hadTool)) {
-    html += `<div style="color:var(--text-ghost); font-style:italic; font-size:12px;">No thinking/tool data for this session.</div>`;
+  if (showThinking && !hadThinking) {
+    html += `<div style="color:var(--text-ghost); font-style:italic; font-size:12px;">No thinking data for this session.</div>`;
+  }
+  if (showTools && !hadTool) {
+    html += `<div style="color:var(--text-ghost); font-style:italic; font-size:12px;">No tool data for this session.</div>`;
   }
   return html;
 }

@@ -134,4 +134,37 @@ describe("session detail thinking/tools toggle", () => {
     expect(html).not.toContain("SECRET_REASONING");
     expect(html).toContain("Hide thinking"); // control still shown
   });
+
+  test("dimension-specific no-data note: tool data present but no thinking data", () => {
+    const toolOnlyJsonl = [
+      JSON.stringify({ type: "user", message: { content: [{ type: "text", text: "the question" }] } }),
+      JSON.stringify({ type: "assistant", message: { content: [
+        { type: "text", text: "the answer" },
+        { type: "tool_use", name: "Bash", input: { command: "ls" } },
+      ] } }),
+    ].join("\n");
+    const src = join(tempDir, "tool-only.jsonl"); writeFileSync(src, toolOnlyJsonl);
+    seedWithFile("s1", src);
+
+    const html = renderSessionDetail(db, "s1", { showThinking: true, showTools: true });
+    expect(html).toContain("Bash"); // tool content actually rendered
+    expect(html).toContain("No thinking data for this session.");
+    expect(html).not.toContain("No tool data for this session.");
+    expect(html).not.toContain("No thinking/tool data for this session.");
+  });
+
+  test("toggle links preserve the other param", () => {
+    const src = join(tempDir, "s.jsonl"); writeFileSync(src, jsonl);
+    seedWithFile("s1", src);
+
+    const htmlToolsOnly = renderSessionDetail(db, "s1", { showTools: true });
+    const thinkingLinkMatch = htmlToolsOnly.match(/<a href="([^"]+)">Show thinking<\/a>/);
+    expect(thinkingLinkMatch).not.toBeNull();
+    expect(thinkingLinkMatch![1]).toContain("tools=1");
+
+    const htmlThinkingOnly = renderSessionDetail(db, "s1", { showThinking: true });
+    const toolsLinkMatch = htmlThinkingOnly.match(/<a href="([^"]+)">Show tools<\/a>/);
+    expect(toolsLinkMatch).not.toBeNull();
+    expect(toolsLinkMatch![1]).toContain("thinking=1");
+  });
 });
