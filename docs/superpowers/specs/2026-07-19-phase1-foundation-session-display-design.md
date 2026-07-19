@@ -35,16 +35,21 @@ Stand up a **React frontend inside the engineering-notebook repo**, served by th
 - `parseTranscriptStructured(jsonlText)` → ordered blocks preserving message boundaries: `{ role, uuid, parentUuid, timestamp, blocks: Block[] }[]` where `Block = text | thinking | tool_use{id,name,input} | tool_result{toolUseId,content}`. (Extends the existing `parseTranscript`; keeps ids for pairing and message threading for later branch support.)
 - Reads the session's `source_path`; falls back to `{error:"source unavailable"}` when missing.
 
-### Backend: subagent discovery + mapping (reuse the viewer's strategy)
-- Discover subagent files for a session: files sharing the session's `sessionId` with `isSidechain:true` / `agent-<agentId>.jsonl` naming (exact on-disk layout — flat vs a `subagents/` subdir — verified by a data spike in the plan's Task 1).
-- Map each subagent to a parent **`Task` tool_use** by matching the subagent's **first user prompt** to the Task's `input` (prompt/description), as claude-session-viewer does (no hard id link exists — confirmed in the data). Unmatched subagents are listed at session level.
+### Backend: subagent discovery + mapping (exact, via `.meta.json`)
+On-disk layout confirmed by spike: `<project>/<sessionId>/subagents/agent-<agentId>.jsonl`, each with a sibling `agent-<agentId>.meta.json`:
+```json
+{ "agentType": "general-purpose", "description": "Implement Task 1: transcript parser",
+  "toolUseId": "toolu_01Up…", "spawnDepth": 1 }
+```
+- Discover subagents by listing `<project>/<sessionId>/subagents/`.
+- **Map each subagent to its parent `Task` tool_use *exactly* via `meta.toolUseId`** — no prompt-matching heuristic needed (the viewer's approach is superseded). `description`, `agentType`, and `spawnDepth` come from the meta file; `spawnDepth > 1` means a subagent spawned by another subagent (nest recursively).
 - `GET /api/subagent/:sessionId/:agentId` returns that subagent's structured transcript.
 
 ### API surface (Phase 1)
 | Method/Path | Returns |
 |---|---|
 | `GET /api/sessions?limit&offset&project&q` | paginated session list: id, project, title/first-prompt, started/ended, message count, has-subagents, is-summarized (best-effort from existing tables) |
-| `GET /api/sessions/:id` | session metadata + the list of `{agentId, description}` subagents and their mapped `toolUseId` |
+| `GET /api/sessions/:id` | session metadata + the list of `{agentId, description, agentType, toolUseId, spawnDepth}` subagents (from each `.meta.json`) |
 | `GET /api/sessions/:id/transcript` | structured transcript (blocks) for the main session |
 | `GET /api/subagent/:sessionId/:agentId` | structured transcript for one subagent |
 
@@ -69,8 +74,8 @@ All JSON; errors as `{ error }` with appropriate status. These are additive (new
 
 ## Risks / decisions deferred to the Phase 1 plan
 
-- **On-disk subagent layout** for this machine (flat `agent-*.jsonl` vs `<sessionId>/subagents/`) — resolve via a data spike (plan Task 1) before coding discovery.
-- **Vite ↔ Hono wiring** (dev proxy + prod static serving under Bun) — a small integration spike.
+- **On-disk subagent layout** — RESOLVED by spike: `<project>/<sessionId>/subagents/agent-<id>.jsonl` + `.meta.json` with an exact `toolUseId`. No longer a risk.
+- **Vite ↔ Hono wiring** (dev proxy + prod static serving under Bun) — a small integration spike (plan Task 1).
 - **Tailwind vs notebook tokens** — pick in the plan; lean Tailwind.
 - **Session-list "title"** — reuse the existing display_name/first-prompt logic.
 - Keep Phase 1 to the 80%: no diff view, minimap, or branch switcher (Phase 5).
