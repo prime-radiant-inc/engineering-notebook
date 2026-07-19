@@ -29,7 +29,9 @@ export function createGroup(db: Database, name: string): number {
       .get(clean) as { id: number };
     return row.id;
   } catch (err) {
-    if (String(err).includes("UNIQUE")) throw new Error("Group name already exists");
+    if (err instanceof Error && (err as any).code === "SQLITE_CONSTRAINT_UNIQUE") {
+      throw new Error("Group name already exists");
+    }
     throw err;
   }
 }
@@ -39,7 +41,9 @@ export function renameGroup(db: Database, id: number, name: string): void {
   try {
     db.query("UPDATE groups SET name = ? WHERE id = ?").run(clean, id);
   } catch (err) {
-    if (String(err).includes("UNIQUE")) throw new Error("Group name already exists");
+    if (err instanceof Error && (err as any).code === "SQLITE_CONSTRAINT_UNIQUE") {
+      throw new Error("Group name already exists");
+    }
     throw err;
   }
 }

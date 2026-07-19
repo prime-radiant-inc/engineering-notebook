@@ -336,7 +336,11 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
     const form = await c.req.parseBody();
     const raw = (form.group_id as string) || "";
     const groupId = raw === "" ? null : parseInt(raw, 10);
-    assignSession(db, sessionId, groupId === null || isNaN(groupId) ? null : groupId);
+    try {
+      assignSession(db, sessionId, groupId === null || isNaN(groupId) ? null : groupId);
+    } catch {
+      // invalid/stale group_id (e.g. group deleted in another tab) — ignore, don't 500
+    }
     return c.redirect(`/session/${encodeURIComponent(sessionId)}`);
   });
 

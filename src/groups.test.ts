@@ -126,4 +126,20 @@ describe("groups", () => {
   test("getGroupWithSessions returns null for missing group", () => {
     expect(getGroupWithSessions(db, 999)).toBeNull();
   });
+
+  test("listGroups orders by lastActivityAt desc, nulls last, ties by name asc", () => {
+    seedProject();
+    seedSession("s-old", "proj-a", "2026-07-01T00:00:00Z");
+    seedSession("s-new", "proj-a", "2026-07-15T00:00:00Z");
+
+    const older = createGroup(db, "Older");
+    assignSession(db, "s-old", older);
+    const newer = createGroup(db, "Newer");
+    assignSession(db, "s-new", newer);
+    const emptyB = createGroup(db, "EmptyB");
+    const emptyA = createGroup(db, "EmptyA");
+
+    const names = listGroups(db).map((g) => g.name);
+    expect(names).toEqual(["Newer", "Older", "EmptyA", "EmptyB"]);
+  });
 });

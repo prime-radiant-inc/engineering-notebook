@@ -270,5 +270,15 @@ describe("server", () => {
       expect(r2.status).toBe(302);
       expect(db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get()).toBeNull();
     });
+
+    test("POST /sessions/:id/group with nonexistent group_id redirects, doesn't 500", async () => {
+      const app = createApp(db, syncManager);
+      seedSession("s1");
+      const form = new FormData();
+      form.append("group_id", "999999");
+      const res = await app.request("/sessions/s1/group", { method: "POST", body: form });
+      expect(res.status).toBe(302);
+      expect(db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get()).toBeNull();
+    });
   });
 });
