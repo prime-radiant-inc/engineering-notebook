@@ -235,12 +235,12 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
       }
       // Skipped or no groups — show a muted card
       return c.html(`<div class="entry-card" style="opacity: 0.5;">
-        <div class="entry-label">${date}</div>
+        <div class="entry-label">${escapeHtml(date)}</div>
         <div class="entry-summary" style="color: var(--text-ghost); font-style: italic;">No journal-worthy sessions on this date.</div>
       </div>`);
     } catch (err) {
       return c.html(`<div class="entry-card" style="opacity: 0.5;">
-        <div class="entry-label">${date}</div>
+        <div class="entry-label">${escapeHtml(date)}</div>
         <div class="entry-summary" style="color: #b91c1c; font-style: italic;">Summary failed: ${escapeHtml(String(err))}</div>
       </div>`);
     }
