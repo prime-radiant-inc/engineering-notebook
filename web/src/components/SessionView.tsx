@@ -11,7 +11,7 @@ export function SessionView({ id, onOpenSession, focusToolUseId }: { id: string;
   const [data, setData] = useState<TranscriptData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const { showThinking, showTools, uncompacted } = useTranscriptToggles();
+  const { showThinking, showTools, uncompacted, setUncompacted, setCompactedAvailable } = useTranscriptToggles();
 
   useEffect(() => {
     setLoading(true);
@@ -20,10 +20,21 @@ export function SessionView({ id, onOpenSession, focusToolUseId }: { id: string;
     setData(null);
     // uncompacted (default) fetches the full transcript, incl. pre-compaction messages.
     Promise.all([getSession(id), getTranscript(id, uncompacted)])
-      .then(([m, t]) => { setMeta(m); setData(t); })
+      .then(([m, t]) => {
+        setMeta(m);
+        setData(t);
+        const compacted = t.compacted ?? false;
+        setCompactedAvailable(compacted);
+        // Nothing to compact to → keep the default (uncompacted) view so the
+        // disabled toggle never leaves the reader stranded in compacted mode.
+        if (!compacted) setUncompacted(true);
+      })
       .catch((e) => setError(String(e.message ?? e)))
       .finally(() => setLoading(false));
-  }, [id, uncompacted]);
+  }, [id, uncompacted, setCompactedAvailable, setUncompacted]);
+
+  // The toggle only applies to the open session — disable it again on leave.
+  useEffect(() => () => setCompactedAvailable(false), [setCompactedAvailable]);
 
   const messages = useMemo(() => (data ? toParsedMessages(data.messages) : []), [data]);
   const subagentMap = useMemo(() => (meta ? toSubagentMap(meta.subagents) : {}), [meta]);

@@ -85,7 +85,7 @@ describe("SessionView (ported viewer)", () => {
   });
 
   test("defaults to the uncompacted (full) transcript; the toggle switches to compacted and back", async () => {
-    const getT = vi.spyOn(api, "getTranscript").mockResolvedValue(transcript);
+    const getT = vi.spyOn(api, "getTranscript").mockResolvedValue({ ...transcript, compacted: true });
     vi.spyOn(api, "getSession").mockResolvedValue(meta);
 
     renderView("s1", vi.fn());
@@ -93,10 +93,22 @@ describe("SessionView (ported viewer)", () => {
     // Default is uncompacted → full transcript requested.
     expect(getT).toHaveBeenLastCalledWith("s1", true);
 
-    fireEvent.click(screen.getByRole("button", { name: "View compacted" }));
+    // Enabled because the session is compacted.
+    const toggle = screen.getByRole("button", { name: "View compacted" });
+    expect(toggle).not.toBeDisabled();
+    fireEvent.click(toggle);
     await waitFor(() => expect(getT).toHaveBeenLastCalledWith("s1", false));
     // Button label flips to offer switching back.
     expect(screen.getByRole("button", { name: "View uncompacted" })).toBeInTheDocument();
+  });
+
+  test("the compacted toggle is disabled when the session was not compacted", async () => {
+    vi.spyOn(api, "getSession").mockResolvedValue(meta);
+    vi.spyOn(api, "getTranscript").mockResolvedValue(transcript); // no `compacted` → false
+
+    renderView("s1", vi.fn());
+    await screen.findByText("the answer");
+    expect(screen.getByRole("button", { name: "View compacted" })).toBeDisabled();
   });
 
   test("subagent spawn link is visible even with tools hidden, and it navigates", async () => {
