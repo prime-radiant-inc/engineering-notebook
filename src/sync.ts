@@ -148,20 +148,20 @@ export class SyncManager {
       const remoteSources =
         this.config.remote_sources?.filter((s) => s.enabled) || [];
       const results: SyncResult[] = [];
+      const sources = this.config.sources.map(expandPath);
       if (remoteSources.length > 0) {
         const syncResult = await syncAllRemoteSources(remoteSources, (r) =>
           results.push(r)
         );
-        const sources = this.config.sources.map(expandPath);
         sources.push(...syncResult.cachedPaths);
-        const files = scanSources(sources, this.config.exclude);
-        const ingestResult = ingestSessions(files, this.db, false);
-        this.status.lastIngestStats = {
-          ingested: ingestResult.ingested,
-          skipped: ingestResult.skipped,
-          errors: ingestResult.errors.length,
-        };
       }
+      const files = scanSources(sources, this.config.exclude);
+      const ingestResult = ingestSessions(files, this.db, false);
+      this.status.lastIngestStats = {
+        ingested: ingestResult.ingested,
+        skipped: ingestResult.skipped,
+        errors: ingestResult.errors.length,
+      };
       this.status.lastResults = results;
       this.status.lastRun = new Date();
     } finally {
