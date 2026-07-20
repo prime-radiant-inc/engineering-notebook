@@ -36,14 +36,14 @@ export function TranscriptToggleButtons() {
     `px-1.5 py-0.5 rounded text-xs transition-colors ${active ? "bg-panel text-slate hover:text-ink" : "bg-teal-wash text-teal hover:text-ink"}`;
   return (
     <div className="flex gap-2">
+      <button className={cls(uncompacted)} onClick={() => setUncompacted((v) => !v)}>
+        {uncompacted ? "View compacted" : "View uncompacted"}
+      </button>
       <button className={cls(showThinking)} onClick={() => setShowThinking((v) => !v)}>
         {showThinking ? "Hide thinking" : "Show thinking"}
       </button>
       <button className={cls(showTools)} onClick={() => setShowTools((v) => !v)}>
         {showTools ? "Hide tools" : "Show tools"}
-      </button>
-      <button className={cls(uncompacted)} onClick={() => setUncompacted((v) => !v)}>
-        {uncompacted ? "View compacted" : "View uncompacted"}
       </button>
     </div>
   );
