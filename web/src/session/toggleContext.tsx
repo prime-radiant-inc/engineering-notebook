@@ -46,7 +46,9 @@ export function TranscriptToggleButtons() {
   return (
     <div className="flex gap-2">
       <button
-        className={`${cls(uncompacted)} disabled:opacity-40 disabled:cursor-default disabled:hover:text-slate`}
+        // Availability cue: light green (like the other toggles) when a compacted
+        // view exists, gray when it doesn't.
+        className={`${cls(!compactedAvailable)} disabled:cursor-default disabled:hover:text-slate`}
         onClick={() => setUncompacted((v) => !v)}
         disabled={!compactedAvailable}
         title={compactedAvailable ? undefined : "This session was not compacted"}
