@@ -13,6 +13,7 @@ interface ToolResult {
 interface SubagentContext {
   subagentMap: Record<string, string>;
   sessionId: string;
+  onOpenSubagent?: (sessionId: string) => void;
 }
 
 interface ToolCallInlineProps {
@@ -159,19 +160,29 @@ function GrepCall({ input, result }: { input: Record<string, unknown>; result?: 
   );
 }
 
-function TaskCall({ input, id, subagentCtx }: { input: Record<string, unknown>; result?: ToolResult; id: string; subagentCtx?: SubagentContext }) {
+function TaskCall({ name, input, id, subagentCtx }: { name: string; input: Record<string, unknown>; result?: ToolResult; id: string; subagentCtx?: SubagentContext }) {
   const description = String(input.description || "");
   const subagentType = String(input.subagent_type || "");
   const agentId = subagentCtx?.subagentMap[id];
+  const openSubagent = subagentCtx?.onOpenSubagent;
   return (
     <div>
       <div className="text-xs">
-        <ToolLabel name="Task" />{" "}
+        <ToolLabel name={name} />{" "}
         {subagentType && <span className="text-teal font-medium">[{subagentType}]</span>}{" "}
         <span className="text-slate">{description}</span>
+        {agentId && openSubagent && (
+          <button
+            onClick={() => openSubagent(`agent-${agentId}`)}
+            className="text-teal underline hover:text-ink ml-1.5 whitespace-nowrap"
+            title="Open this subagent's transcript in panel 3"
+          >
+            ↗ open subagent
+          </button>
+        )}
       </div>
       {agentId && subagentCtx && (
-        <SubagentPanel sessionId={subagentCtx.sessionId} agentId={agentId} description={description} />
+        <SubagentPanel sessionId={subagentCtx.sessionId} agentId={agentId} description={description} agentType={subagentType} />
       )}
     </div>
   );
@@ -252,13 +263,17 @@ const WEB_TOOLS = new Set(["WebFetch", "WebSearch"]);
 
 export function ToolCallInline({ name, id, input, result, subagentCtx }: ToolCallInlineProps) {
   let content: React.ReactNode;
-  if (name === "Bash") content = <BashCall input={input} result={result} />;
+  // A subagent spawn is identified by the block id being in the subagent map,
+  // not by the tool name (Claude Code names it "Agent", others use "Task").
+  const isSpawn = !!subagentCtx?.subagentMap[id];
+  if (isSpawn) content = <TaskCall name={name} input={input} result={result} id={id} subagentCtx={subagentCtx} />;
+  else if (name === "Bash") content = <BashCall input={input} result={result} />;
   else if (name === "Read") content = <ReadCall input={input} result={result} />;
   else if (name === "Write") content = <WriteCall input={input} result={result} />;
   else if (name === "Edit") content = <EditCall input={input} result={result} />;
   else if (name === "Glob") content = <GlobCall input={input} result={result} />;
   else if (name === "Grep") content = <GrepCall input={input} result={result} />;
-  else if (name === "Task") content = <TaskCall input={input} result={result} id={id} subagentCtx={subagentCtx} />;
+  else if (name === "Task") content = <TaskCall name={name} input={input} result={result} id={id} subagentCtx={subagentCtx} />;
   else if (TASK_TOOLS.has(name)) content = <TaskManagementCall name={name} input={input} result={result} />;
   else if (WEB_TOOLS.has(name)) content = <WebCall name={name} input={input} result={result} />;
   else content = <DefaultCall name={name} input={input} result={result} />;

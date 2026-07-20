@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { getJournalDates, getJournalEntries, type JournalDate, type JournalEntry } from "../api";
 import { ThreePanel } from "../components/AppShell";
 import { SessionView } from "../components/SessionView";
+import { SessionRefList } from "../components/SessionRefList";
 
 function fmtDate(iso: string): string {
   return iso; // YYYY-MM-DD; kept simple
@@ -15,6 +16,8 @@ export default function Journal() {
   const [date, setDate] = useState<string | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [focusTuid, setFocusTuid] = useState<string | undefined>(undefined);
+  const openSession = (id: string, tuid?: string) => { setSessionId(id); setFocusTuid(tuid); };
   const [datesError, setDatesError] = useState<string | null>(null);
   const [loadingDates, setLoadingDates] = useState(true);
 
@@ -38,6 +41,7 @@ export default function Journal() {
   useEffect(() => {
     if (!date) { setEntries([]); return; }
     setSessionId(null);
+    setFocusTuid(undefined);
     getJournalEntries(date).then((r) => setEntries(r.entries)).catch(() => setEntries([]));
   }, [date]);
 
@@ -85,17 +89,7 @@ export default function Journal() {
             </ul>
           )}
           {e.sessions.length > 0 && (
-            <div className="mt-2 flex flex-col gap-1">
-              {e.sessions.map((s, i) => (
-                <button
-                  key={s.id}
-                  onClick={() => setSessionId(s.id)}
-                  className={`text-left text-xs px-2 py-1 rounded border ${s.id === sessionId ? "bg-accent text-white border-accent" : "border-stone-300 text-stone-600 hover:border-accent"}`}
-                >
-                  {s.title || `Session ${i + 1}`}
-                </button>
-              ))}
-            </div>
+            <SessionRefList sessions={e.sessions} selectedId={sessionId} onSelect={openSession} variant="journal" />
           )}
         </div>
       ))}
@@ -105,7 +99,7 @@ export default function Journal() {
   const detail = (
     <div className="p-6">
       {sessionId ? (
-        <SessionView id={sessionId} />
+        <SessionView id={sessionId} onOpenSession={openSession} focusToolUseId={focusTuid} />
       ) : (
         <div className="text-sm text-stone-400">Select a session to view its transcript.</div>
       )}

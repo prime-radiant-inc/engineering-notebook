@@ -31,6 +31,7 @@ export type Subagent = {
   description?: string;
   toolUseId?: string;
   spawnDepth?: number;
+  started_at?: string | null;
 };
 
 export type SessionListRow = {
@@ -57,6 +58,11 @@ export type SessionMeta = {
   git_branch: string | null;
   title: string | null;
   title_source: "desktop" | "user" | "generated" | null;
+  is_subagent?: number;
+  parent_session_id: string | null;
+  parent_title: string | null;
+  subtask_title?: string | null;
+  spawn_tool_use_id?: string | null;
   subagents: Subagent[];
 };
 
@@ -97,7 +103,8 @@ export function getSubagent(sessionId: string, agentId: string): Promise<Transcr
 }
 
 export type JournalDate = { date: string; projects: string[] };
-export type SessionRef = { id: string; title: string | null };
+export type SubagentRef = { id: string; agentType?: string; description?: string };
+export type SessionRef = { id: string; title: string | null; subagents: SubagentRef[] };
 export type JournalEntry = {
   id: number;
   date: string;
@@ -133,7 +140,7 @@ export function getCalendar(month: string): Promise<{ days: CalendarDay[] }> {
 }
 
 export type GroupRow = { id: number; name: string; sessionCount: number; lastActivityAt: string | null };
-export type GroupSessionRow = { id: string; display_name: string; project_id: string; started_at: string; message_count: number; title: string | null };
+export type GroupSessionRow = { id: string; display_name: string; project_id: string; started_at: string; message_count: number; title: string | null; subagents?: SubagentRef[] };
 export function getGroups(): Promise<{ groups: GroupRow[]; desktopRunning: boolean }> {
   return getJson("/api/groups");
 }

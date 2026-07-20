@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { getProjects, getProjectEntries, type ProjectRow, type JournalEntry } from "../api";
 import { ThreePanel } from "../components/AppShell";
 import { SessionView } from "../components/SessionView";
+import { SessionRefList } from "../components/SessionRefList";
 
 export default function Projects() {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [focusTuid, setFocusTuid] = useState<string | undefined>(undefined);
+  const openSession = (id: string, tuid?: string) => { setSessionId(id); setFocusTuid(tuid); };
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -19,6 +22,7 @@ export default function Projects() {
   useEffect(() => {
     if (!projectId) { setEntries([]); return; }
     setSessionId(null);
+    setFocusTuid(undefined);
     getProjectEntries(projectId).then((r) => setEntries(r.entries)).catch(() => setEntries([]));
   }, [projectId]);
 
@@ -49,14 +53,7 @@ export default function Projects() {
             </div>
           )}
           {e.sessions.length > 0 && (
-            <div className="mt-2 flex flex-col gap-1">
-              {e.sessions.map((s, i) => (
-                <button key={s.id} onClick={() => setSessionId(s.id)}
-                  className={`text-left text-xs px-2 py-1 rounded border ${s.id === sessionId ? "bg-teal text-white border-teal" : "border-edge text-slate hover:border-teal"}`}>
-                  {s.title || `Session ${i + 1}`}
-                </button>
-              ))}
-            </div>
+            <SessionRefList sessions={e.sessions} selectedId={sessionId} onSelect={openSession} variant="projects" />
           )}
         </div>
       ))}
@@ -65,7 +62,7 @@ export default function Projects() {
 
   const detail = (
     <div className="p-6">
-      {sessionId ? <SessionView id={sessionId} /> : <div className="text-sm text-slate">Select a session to view its transcript.</div>}
+      {sessionId ? <SessionView id={sessionId} onOpenSession={openSession} focusToolUseId={focusTuid} /> : <div className="text-sm text-slate">Select a session to view its transcript.</div>}
     </div>
   );
 

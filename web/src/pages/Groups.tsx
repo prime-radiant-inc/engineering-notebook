@@ -11,6 +11,8 @@ export default function Groups() {
   const [selection, setSelection] = useState<Selection>(null);
   const [sessions, setSessions] = useState<GroupSessionRow[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [focusTuid, setFocusTuid] = useState<string | undefined>(undefined);
+  const openSession = (id: string, tuid?: string) => { setSessionId(id); setFocusTuid(tuid); };
   const [ungroupedTotal, setUngroupedTotal] = useState(0);
   const [banner, setBanner] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -77,19 +79,37 @@ export default function Groups() {
     <div className="p-4">
       {!selection && <div className="text-xs text-slate">Select a group, or Ungrouped.</div>}
       {selection && sessions.length === 0 && <div className="text-xs text-slate">No sessions.</div>}
-      {sessions.map((s) => (
-        <button key={s.id} onClick={() => setSessionId(s.id)}
-          className={`block w-full text-left px-3 py-2 border-b border-edge/60 rounded ${s.id === sessionId ? "bg-panel" : "hover:bg-surface"}`}>
-          <div className="text-sm text-ink">{s.title || s.display_name || s.project_id}</div>
-          <div className="text-[11px] text-slate/70">{s.started_at.slice(0, 10)} · {s.message_count} messages · {s.project_id}</div>
-        </button>
-      ))}
+      {sessions.map((s) => {
+        // Reveal a session's subagents only once it (or one of its subagents) is selected.
+        const expanded = s.id === sessionId || (s.subagents?.some((sub) => sub.id === sessionId) ?? false);
+        return (
+        <div key={s.id}>
+          <button onClick={() => openSession(s.id)}
+            className={`block w-full text-left px-3 py-2 border-b border-edge/60 rounded ${s.id === sessionId ? "bg-panel" : "hover:bg-surface"}`}>
+            <div className="text-sm text-ink">{s.title || s.display_name || s.project_id}</div>
+            <div className="text-[11px] text-slate/70">{s.started_at.slice(0, 10)} · {s.message_count} messages · {s.project_id}</div>
+          </button>
+          {expanded && (s.subagents?.length ?? 0) > 0 && (
+            <div className="ml-3 my-1 flex flex-col gap-0.5 border-l border-edge/50 pl-2">
+              {s.subagents!.map((sub) => (
+                <button key={sub.id} onClick={() => openSession(sub.id)}
+                  title={sub.description || sub.agentType || "subtask"}
+                  className={`text-left text-[11px] px-2 py-0.5 rounded flex items-center gap-1 ${sub.id === sessionId ? "text-teal font-medium" : "text-slate/60 hover:text-slate"}`}>
+                  <span aria-hidden>🤖</span>
+                  <span className="truncate">{sub.description || sub.agentType || "subtask"}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        );
+      })}
     </div>
   );
 
   const detail = (
     <div className="p-6">
-      {sessionId ? <SessionView id={sessionId} /> : <div className="text-sm text-slate">Select a session to view its transcript.</div>}
+      {sessionId ? <SessionView id={sessionId} onOpenSession={openSession} focusToolUseId={focusTuid} /> : <div className="text-sm text-slate">Select a session to view its transcript.</div>}
     </div>
   );
 

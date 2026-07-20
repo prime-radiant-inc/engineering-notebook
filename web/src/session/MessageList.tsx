@@ -11,6 +11,8 @@ export function MessageList({
   messages,
   subagentMap,
   sessionId,
+  onOpenSubagent,
+  focusToolUseId,
   showThinking,
   showTools,
   userName,
@@ -19,6 +21,8 @@ export function MessageList({
   messages: ParsedMessage[];
   subagentMap?: Record<string, string>;
   sessionId: string;
+  onOpenSubagent?: (sessionId: string) => void;
+  focusToolUseId?: string;
   showThinking: boolean;
   showTools: boolean;
   userName?: string;
@@ -29,8 +33,33 @@ export function MessageList({
   const { toolResultMap, consumedUuids } = useMemo(() => buildToolResultMap(shown), [shown]);
   const continuationFlags = useMemo(() => buildContinuationFlags(shown), [shown]);
 
+  // Index of the message carrying the spawn tool_use we want to scroll to.
+  const focusIndex = useMemo(() => {
+    if (!focusToolUseId) return -1;
+    return shown.findIndex((m) => m.content.some((b) => b.type === "tool_use" && b.id === focusToolUseId));
+  }, [shown, focusToolUseId]);
+
+  // Grow the initial batch to include the focus target so it can be scrolled to.
   const [limit, setLimit] = useState(BATCH);
+  // Reset the window only when the conversation changes...
   useEffect(() => { setLimit(BATCH); }, [shown]);
+  // ...and GROW it (never shrink) to include a focus target so it can be scrolled to.
+  useEffect(() => { if (focusIndex >= 0) setLimit((l) => Math.max(l, focusIndex + 3)); }, [focusIndex]);
+
+  // Scroll to the focus target ONCE per target. Keeping `limit` in deps lets us
+  // retry until the (batched-in) element exists, but the ref guard prevents
+  // re-scrolling on later batch growth — otherwise scrolling down would yank the
+  // reader back to the spawn point every time the list grew.
+  const scrolledFor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!focusToolUseId) { scrolledFor.current = undefined; return; }
+    if (focusIndex < 0 || scrolledFor.current === focusToolUseId) return;
+    const el = document.getElementById(`spawn-${focusToolUseId}`);
+    if (el) {
+      if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center", behavior: "smooth" });
+      scrolledFor.current = focusToolUseId;
+    }
+  }, [focusIndex, limit, focusToolUseId]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -56,6 +85,8 @@ export function MessageList({
           toolResultMap={toolResultMap}
           subagentMap={subagentMap}
           sessionId={sessionId}
+          onOpenSubagent={onOpenSubagent}
+          focusToolUseId={focusToolUseId}
           showToolCalls={showTools}
           showThinking={showThinking}
           userName={userName}
