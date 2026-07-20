@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { parseStructuredTranscript } from "../../transcript-structured";
 import { discoverSubagents, subagentFilePath } from "../../subagents";
-import { listGroups, getGroupWithSessions, listUngroupedSessions, importDesktopGroups } from "../../groups";
+import { listGroups, getGroupWithSessions, listUngroupedSessions, importDesktopGroups, assignSession } from "../../groups";
 import { readDesktopGroups, isClaudeDesktopRunning } from "../../desktop-groups";
 import { applyDesktopTitles, titleSession } from "../../titles";
 
@@ -108,6 +108,23 @@ export function createApiRouter(db: Database): Hono {
     const data = isNaN(id) ? null : getGroupWithSessions(db, id);
     if (!data) return c.json({ error: "group not found" }, 404);
     return c.json({ ...data, sessions: data.sessions.map((s) => ({ ...s, subagents: subagentsForSession(db, s.id) })) });
+  });
+
+  // Assign a session to a group ({ groupId: number }) or unassign it ({ groupId: null }).
+  api.post("/sessions/:id/group", async (c) => {
+    const id = c.req.param("id");
+    if (!db.query("SELECT id FROM sessions WHERE id = ?").get(id)) return c.json({ error: "session not found" }, 404);
+    let body: { groupId?: number | null };
+    try { body = await c.req.json(); } catch { body = {}; }
+    const raw = body?.groupId;
+    const groupId = raw === null || raw === undefined ? null : Number(raw);
+    if (groupId !== null) {
+      if (Number.isNaN(groupId) || !db.query("SELECT id FROM groups WHERE id = ?").get(groupId)) {
+        return c.json({ error: "group not found" }, 404);
+      }
+    }
+    assignSession(db, id, groupId);
+    return c.json({ ok: true, sessionId: id, groupId });
   });
 
   // Generate + store a title for one Claude Code session that lacks one.

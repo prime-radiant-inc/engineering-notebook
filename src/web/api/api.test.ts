@@ -493,6 +493,30 @@ describe("api router", () => {
     expect(cal.days).toEqual([{ date: "2026-07-15", entries: 1, projects: ["My Project"] }]);
   });
 
+  test("POST /sessions/:id/group assigns to a group and unassigns with groupId=null", async () => {
+    db.query("INSERT INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('s1','p','/tmp/p','/x','2026-07-10T00:00:00Z',3,datetime('now'))`).run();
+    const gid = (db.query("INSERT INTO groups (name, created_at) VALUES ('Trading', datetime('now')) RETURNING id").get() as any).id;
+    const app = createApiRouter(db);
+    const post = (id: string, groupId: number | null) =>
+      app.request(`/sessions/${id}/group`, { method: "POST", body: JSON.stringify({ groupId }), headers: { "content-type": "application/json" } });
+
+    // assign
+    expect((await post("s1", gid)).status).toBe(200);
+    expect((db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get() as any).group_id).toBe(gid);
+    const detail = (await (await app.request(`/groups/${gid}`)).json()) as any;
+    expect(detail.sessions.map((s: any) => s.id)).toContain("s1");
+
+    // unassign
+    expect((await post("s1", null)).status).toBe(200);
+    expect(db.query("SELECT group_id FROM session_groups WHERE session_id='s1'").get()).toBeNull();
+
+    // 404s
+    expect((await post("nope", gid)).status).toBe(404); // missing session
+    expect((await post("s1", 99999)).status).toBe(404); // missing group
+  });
+
   test("GET /groups, /groups/ungrouped, /groups/:id — group/ungrouped rows carry nested subagents", async () => {
     db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
     // s1 has a subagent on disk; s2 will be grouped.

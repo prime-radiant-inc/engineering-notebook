@@ -37,4 +37,53 @@ describe("Groups (3-panel)", () => {
     fireEvent.click(subBtn);
     await waitFor(() => expect(api.getSession).toHaveBeenCalledWith("agent-a1"));
   });
+
+  test("dragging a session from panel 2 onto a group in panel 1 assigns it", async () => {
+    vi.spyOn(api, "getGroups").mockResolvedValue({ groups: [{ id: 7, name: "Trading", sessionCount: 0, lastActivityAt: null }], desktopRunning: false });
+    vi.spyOn(api, "getUngrouped").mockResolvedValue({
+      sessions: [{ id: "s1", display_name: "Proj", project_id: "p", started_at: "2026-07-10T00:00:00Z", message_count: 3, title: "My Session", subagents: [] }],
+      total: 1,
+    });
+    vi.spyOn(api, "getGroup").mockResolvedValue({ group: { id: 7, name: "Trading" }, sessions: [] });
+    const assign = vi.spyOn(api, "assignSessionToGroup").mockResolvedValue();
+
+    render(<TranscriptTogglesProvider><Groups /></TranscriptTogglesProvider>);
+
+    // Open Ungrouped so the session row shows.
+    fireEvent.click(await screen.findByText("Ungrouped"));
+    const sessionRow = (await screen.findByText("My Session")).closest("button")!;
+    const groupRow = screen.getByText("Trading").closest("button")!;
+
+    // Simulate the drag with a minimal dataTransfer.
+    const store: Record<string, string> = {};
+    const dataTransfer = { setData: (k: string, v: string) => { store[k] = v; }, getData: (k: string) => store[k] || "", dropEffect: "", effectAllowed: "" };
+    fireEvent.dragStart(sessionRow, { dataTransfer });
+    fireEvent.dragOver(groupRow, { dataTransfer });
+    fireEvent.drop(groupRow, { dataTransfer });
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("s1", 7));
+  });
+
+  test("dropping a session onto Ungrouped unassigns it (groupId null)", async () => {
+    vi.spyOn(api, "getGroups").mockResolvedValue({ groups: [{ id: 7, name: "Trading", sessionCount: 1, lastActivityAt: null }], desktopRunning: false });
+    vi.spyOn(api, "getUngrouped").mockResolvedValue({ sessions: [], total: 0 });
+    vi.spyOn(api, "getGroup").mockResolvedValue({
+      group: { id: 7, name: "Trading" },
+      sessions: [{ id: "s1", display_name: "Proj", project_id: "p", started_at: "2026-07-10T00:00:00Z", message_count: 3, title: "My Session", subagents: [] }],
+    });
+    const assign = vi.spyOn(api, "assignSessionToGroup").mockResolvedValue();
+
+    render(<TranscriptTogglesProvider><Groups /></TranscriptTogglesProvider>);
+
+    fireEvent.click(await screen.findByText("Trading"));
+    const sessionRow = (await screen.findByText("My Session")).closest("button")!;
+    const ungroupedRow = screen.getByText("Ungrouped").closest("button")!;
+
+    const store: Record<string, string> = {};
+    const dataTransfer = { setData: (k: string, v: string) => { store[k] = v; }, getData: (k: string) => store[k] || "", dropEffect: "", effectAllowed: "" };
+    fireEvent.dragStart(sessionRow, { dataTransfer });
+    fireEvent.drop(ungroupedRow, { dataTransfer });
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("s1", null));
+  });
 });

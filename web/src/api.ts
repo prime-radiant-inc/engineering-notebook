@@ -156,3 +156,12 @@ export async function importDesktopGroups(): Promise<{ imported: boolean; summar
   const res = await fetch("/api/groups/import-desktop", { method: "POST" });
   return res.json();
 }
+// Assign a session to a group (groupId) or unassign it (null).
+export async function assignSessionToGroup(sessionId: string, groupId: number | null): Promise<void> {
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/group`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ groupId }),
+  });
+  if (!res.ok) throw new Error(String(res.status));
+}
