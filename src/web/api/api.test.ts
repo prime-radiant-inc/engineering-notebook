@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { initDb, closeDb } from "../../db";
 import { createApiRouter } from "./index";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { tmpdir } from "os";
 
 describe("api router", () => {
@@ -97,6 +97,11 @@ describe("api router", () => {
       `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
        VALUES (?, 'p', '/tmp/p', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`
     ).run("s3", sourcePath);
+    // The subagent must be ingested to be listed (else it would be a dead link).
+    db.query(
+      `INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+       VALUES ('agent-a1','s3','p','/tmp/p', ?, '2026-07-10T00:00:05Z', 1, 1, datetime('now'))`
+    ).run(join(subDir, "agent-a1.jsonl"));
 
     const app = createApiRouter(db);
     const res = await app.request("/sessions/s3");
@@ -105,14 +110,197 @@ describe("api router", () => {
     expect(body.id).toBe("s3");
     expect(body.project_id).toBe("p");
     expect(body.subagents).toEqual([
-      { agentId: "a1", agentType: "general-purpose", description: "Investigate widget bug", toolUseId: "toolu_1", spawnDepth: 1 },
+      { agentId: "a1", agentType: "general-purpose", description: "Investigate widget bug", toolUseId: "toolu_1", spawnDepth: 1, started_at: "2026-07-10T00:00:05Z" },
     ]);
+  });
+
+  test("GET /sessions/:id omits a subagent that is discovered on disk but NOT ingested (no dead link)", async () => {
+    const sourcePath = join(tempDir, "s3b.jsonl");
+    writeFileSync(sourcePath, "");
+    const subDir = join(tempDir, "s3b", "subagents");
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(join(subDir, "agent-ghost.jsonl"), "");
+    writeFileSync(join(subDir, "agent-ghost.meta.json"), JSON.stringify({ agentType: "Explore", description: "never ingested" }));
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('s3b','p','/tmp/p', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`).run(sourcePath);
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/s3b")).json()) as any;
+    expect(body.subagents).toEqual([]); // agent-ghost has no session row → not listed
+  });
+
+  test("GET /sessions/:id lists nested (spawnDepth>1) subagents too, since they live flat under the top session", async () => {
+    const sourcePath = join(tempDir, "s3c.jsonl");
+    writeFileSync(sourcePath, "");
+    const subDir = join(tempDir, "s3c", "subagents");
+    mkdirSync(subDir, { recursive: true });
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('s3c','p','/tmp/p', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`).run(sourcePath);
+    for (const [a, depth, start] of [["d1", 1, "01"], ["d2", 2, "02"]] as const) {
+      writeFileSync(join(subDir, `agent-${a}.jsonl`), "");
+      writeFileSync(join(subDir, `agent-${a}.meta.json`), JSON.stringify({ agentType: "general-purpose", description: `depth-${depth}`, spawnDepth: depth }));
+      db.query(`INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+                VALUES (?, 's3c','p','/tmp/p','/x', ?, 1, 1, datetime('now'))`).run(`agent-${a}`, `2026-07-10T00:00:${start}Z`);
+    }
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/s3c")).json()) as any;
+    expect(body.subagents.map((s: any) => s.spawnDepth)).toEqual([1, 2]); // both reachable, chronological
+  });
+
+  test("GET /sessions/:id returns subagents ordered chronologically with started_at", async () => {
+    const sourcePath = join(tempDir, "sx.jsonl");
+    writeFileSync(sourcePath, "");
+    const subDir = join(tempDir, "sx", "subagents");
+    mkdirSync(subDir, { recursive: true });
+    // agent-a1 sorts first alphabetically but STARTS LATER than agent-a2.
+    for (const a of ["a1", "a2"]) {
+      writeFileSync(join(subDir, `agent-${a}.jsonl`), "");
+      writeFileSync(join(subDir, `agent-${a}.meta.json`), JSON.stringify({ agentType: "Explore", description: a === "a1" ? "later" : "earlier" }));
+    }
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('sx','p','/tmp/p', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`).run(sourcePath);
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-a1','p','/tmp/p','/x', '2026-07-10T02:00:00Z', 1, 1, datetime('now'))`).run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-a2','p','/tmp/p','/x', '2026-07-10T01:00:00Z', 1, 1, datetime('now'))`).run();
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/sx")).json()) as any;
+    expect(body.subagents.map((s: any) => s.agentId)).toEqual(["a2", "a1"]);
+    expect(body.subagents.map((s: any) => s.started_at)).toEqual(["2026-07-10T01:00:00Z", "2026-07-10T02:00:00Z"]);
   });
 
   test("GET /sessions/:id 404s for missing session", async () => {
     const app = createApiRouter(db);
     const res = await app.request("/sessions/nope");
     expect(res.status).toBe(404);
+  });
+
+  test("GET /sessions/:id returns parent link + parent title for a subagent", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at, title, title_source)
+       VALUES ('parent1','p','/tmp/p', ?, '2026-07-10T00:00:00Z', 5, datetime('now'), 'Parent Title', 'generated')`
+    ).run(join(tempDir, "parent1.jsonl"));
+    const subSource = join(tempDir, "parent1", "subagents", "agent-a1.jsonl");
+    mkdirSync(dirname(subSource), { recursive: true });
+    writeFileSync(subSource, "");
+    db.query(
+      `INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+       VALUES ('agent-a1','parent1','p','/tmp/p', ?, '2026-07-10T00:00:05Z', 2, 1, datetime('now'))`
+    ).run(subSource);
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/agent-a1")).json()) as any;
+    expect(body.id).toBe("agent-a1");
+    expect(body.is_subagent).toBe(1);
+    expect(body.parent_session_id).toBe("parent1");
+    expect(body.parent_title).toBe("Parent Title");
+  });
+
+  test("GET /sessions/:id does NOT return a parent_title for a continuation (non-subagent with a parent_session_id)", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at, title)
+              VALUES ('orig','p','/tmp/p','/tmp/orig.jsonl','2026-07-10T00:00:00Z',5,datetime('now'),'Original')`).run();
+    // A resumed session: is_subagent=0 but parent_session_id points at the original.
+    db.query(`INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('resumed','orig','p','/tmp/p','/tmp/resumed.jsonl','2026-07-11T00:00:00Z',3,0,datetime('now'))`).run();
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/resumed")).json()) as any;
+    expect(body.is_subagent).toBe(0);
+    expect(body.parent_title).toBeNull(); // no "Subagent of…" backlink for a continuation
+  });
+
+  test("GET /sessions/:id exposes a subagent's own subtask title (its meta description), no agent type", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    const subSource = join(tempDir, "parentX", "subagents", "agent-z1.jsonl");
+    mkdirSync(dirname(subSource), { recursive: true });
+    writeFileSync(subSource, "");
+    writeFileSync(subSource.replace(/\.jsonl$/, ".meta.json"), JSON.stringify({ agentType: "Explore", description: "Verify sessions table schema", toolUseId: "toolu_spawn9" }));
+    db.query(
+      `INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+       VALUES ('agent-z1','parentX','p','/tmp/p', ?, '2026-07-10T00:00:05Z', 2, 1, datetime('now'))`
+    ).run(subSource);
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/agent-z1")).json()) as any;
+    expect(body.subtask_title).toBe("Verify sessions table schema");
+    expect(body.spawn_tool_use_id).toBe("toolu_spawn9");
+  });
+
+  test("GET /sessions/:id parent_title is null when session has no parent", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','Proj')").run();
+    const src = join(tempDir, "top.jsonl");
+    writeFileSync(src, "");
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+       VALUES ('top','p','/tmp/p', ?, '2026-07-10T00:00:00Z', 1, datetime('now'))`
+    ).run(src);
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions/top")).json()) as any;
+    expect(body.parent_session_id ?? null).toBeNull();
+    expect(body.parent_title ?? null).toBeNull();
+  });
+
+  test("journal entry session refs include nested subagents", async () => {
+    const parentSource = join(tempDir, "s1.jsonl");
+    writeFileSync(parentSource, "");
+    const subDir = join(tempDir, "s1", "subagents");
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(join(subDir, "agent-a1.jsonl"), "");
+    writeFileSync(join(subDir, "agent-a1.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "Investigate", toolUseId: "toolu_1", spawnDepth: 1 }));
+
+    db.query("INSERT INTO projects (id, path, display_name) VALUES ('p','/tmp/p','My Project')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at, title)
+       VALUES ('s1','p','/tmp/p', ?, '2026-07-15T00:00:00Z', 3, datetime('now'), 'Real Session')`
+    ).run(parentSource);
+    db.query(`INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-a1','s1','p','/tmp/p', ?, '2026-07-15T00:00:05Z', 1, 1, datetime('now'))`).run(join(subDir, "agent-a1.jsonl"));
+    db.query(`INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+              VALUES ('2026-07-15','p','["s1"]','H','S','[]','[]',datetime('now'),'m')`).run();
+
+    const app = createApiRouter(db);
+    const entries = (await (await app.request("/journal/entries?date=2026-07-15")).json()) as any;
+    expect(entries.entries[0].sessions).toEqual([
+      { id: "s1", title: "Real Session", subagents: [{ id: "agent-a1", agentType: "general-purpose", description: "Investigate" }] },
+    ]);
+  });
+
+  test("journal entry nested subagents are ordered chronologically by start time", async () => {
+    const parentSource = join(tempDir, "p2.jsonl");
+    writeFileSync(parentSource, "");
+    const subDir = join(tempDir, "p2", "subagents");
+    mkdirSync(subDir, { recursive: true });
+    // agent-a1 sorts first alphabetically but STARTS LATER; agent-a2 starts earlier.
+    writeFileSync(join(subDir, "agent-a1.jsonl"), "");
+    writeFileSync(join(subDir, "agent-a1.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "later" }));
+    writeFileSync(join(subDir, "agent-a2.jsonl"), "");
+    writeFileSync(join(subDir, "agent-a2.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "earlier" }));
+
+    db.query("INSERT INTO projects (id, path, display_name) VALUES ('p','/tmp/p','My Project')").run();
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at, title)
+       VALUES ('p2','p','/tmp/p', ?, '2026-07-15T00:00:00Z', 3, datetime('now'), 'Parent')`
+    ).run(parentSource);
+    db.query(`INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-a1','p2','p','/tmp/p', ?, '2026-07-15T02:00:00Z', 1, 1, datetime('now'))`).run(join(subDir, "agent-a1.jsonl"));
+    db.query(`INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-a2','p2','p','/tmp/p', ?, '2026-07-15T01:00:00Z', 1, 1, datetime('now'))`).run(join(subDir, "agent-a2.jsonl"));
+    db.query(`INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
+              VALUES ('2026-07-15','p','["p2"]','H','S','[]','[]',datetime('now'),'m')`).run();
+
+    const app = createApiRouter(db);
+    const entries = (await (await app.request("/journal/entries?date=2026-07-15")).json()) as any;
+    const subs = entries.entries[0].sessions[0].subagents;
+    // earlier start (agent-a2) first, despite sorting later alphabetically.
+    expect(subs.map((s: any) => s.id)).toEqual(["agent-a2", "agent-a1"]);
+    expect(subs.map((s: any) => s.description)).toEqual(["earlier", "later"]);
   });
 
   test("GET /subagent/:sessionId/:agentId returns the subagent's structured transcript", async () => {
@@ -268,6 +456,19 @@ describe("api router", () => {
     expect(neg.sessions.length).toBe(0);
   });
 
+  test("GET /sessions excludes subagents", async () => {
+    db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('s1','p','/tmp/p','/tmp/s1.jsonl','2026-07-10T00:00:00Z',3,datetime('now'))`).run();
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-x1','p','/tmp/p','/tmp/a.jsonl','2026-07-10T00:00:05Z',1,1,datetime('now'))`).run();
+
+    const app = createApiRouter(db);
+    const body = (await (await app.request("/sessions")).json()) as any;
+    expect(body.total).toBe(1);
+    expect(body.sessions.map((s: any) => s.id)).toEqual(["s1"]);
+  });
+
   function seedJournal() {
     db.query("INSERT INTO projects (id, path, display_name, last_session_at, session_count) VALUES ('p','/tmp/p','My Project','2026-07-15T00:00:00Z',2)").run();
     db.query(`INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, open_questions, generated_at, model_used)
@@ -290,11 +491,23 @@ describe("api router", () => {
     expect(cal.days).toEqual([{ date: "2026-07-15", entries: 1, projects: ["My Project"] }]);
   });
 
-  test("GET /groups, /groups/ungrouped, /groups/:id", async () => {
+  test("GET /groups, /groups/ungrouped, /groups/:id — group/ungrouped rows carry nested subagents", async () => {
     db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();
+    // s1 has a subagent on disk; s2 will be grouped.
+    const s1Source = join(tempDir, "s1.jsonl");
+    writeFileSync(s1Source, "");
+    const subDir = join(tempDir, "s1", "subagents");
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(join(subDir, "agent-g1.jsonl"), "");
+    writeFileSync(join(subDir, "agent-g1.meta.json"), JSON.stringify({ agentType: "Explore", description: "dig in" }));
     db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
-              VALUES ('s1','p','/tmp/p','/tmp/s.jsonl','2026-07-10T00:00:00Z',3,datetime('now'))`).run();
+              VALUES ('s1','p','/tmp/p', ?, '2026-07-10T00:00:00Z',3,datetime('now'))`).run(s1Source);
+    db.query(`INSERT INTO sessions (id, parent_session_id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+              VALUES ('agent-g1','s1','p','/tmp/p', ?, '2026-07-10T00:00:05Z',1,1,datetime('now'))`).run(join(subDir, "agent-g1.jsonl"));
+    db.query(`INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
+              VALUES ('s2','p','/tmp/p','/tmp/s2.jsonl','2026-07-11T00:00:00Z',3,datetime('now'))`).run();
     const gid = (db.query("INSERT INTO groups (name, created_at) VALUES ('Trading', datetime('now')) RETURNING id").get() as any).id;
+    db.query("INSERT INTO session_groups (session_id, group_id, assigned_at) VALUES ('s2', ?, datetime('now'))").run(gid);
     const app = createApiRouter(db);
 
     const groups = (await (await app.request("/groups")).json()) as any;
@@ -303,9 +516,12 @@ describe("api router", () => {
     const ung = (await (await app.request("/groups/ungrouped")).json()) as any;
     expect(ung.total).toBe(1);
     expect(ung.sessions[0].id).toBe("s1");
+    expect(ung.sessions[0].subagents).toEqual([{ id: "agent-g1", agentType: "Explore", description: "dig in" }]);
 
     const detail = (await (await app.request(`/groups/${gid}`)).json()) as any;
     expect(detail.group.name).toBe("Trading");
+    expect(detail.sessions[0].id).toBe("s2");
+    expect(detail.sessions[0].subagents).toEqual([]); // s2 has no subagents dir
     expect((await app.request("/groups/99999")).status).toBe(404);
   });
 });

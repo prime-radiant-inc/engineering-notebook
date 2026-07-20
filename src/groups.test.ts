@@ -5,7 +5,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   createGroup, listGroups, renameGroup, deleteGroup,
-  assignSession, getSessionGroupId, getGroupWithSessions,
+  assignSession, getSessionGroupId, getGroupWithSessions, listUngroupedSessions,
 } from "./groups";
 
 describe("groups", () => {
@@ -21,6 +21,12 @@ describe("groups", () => {
     db.query(
       `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, ingested_at)
        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).run(id, projectId, "/tmp/" + projectId, "/tmp/src.jsonl", startedAt, 5);
+  }
+  function seedSubagent(id: string, projectId = "proj-a", startedAt = "2026-07-10T12:05:00Z") {
+    db.query(
+      `INSERT INTO sessions (id, project_id, project_path, source_path, started_at, message_count, is_subagent, ingested_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'))`
     ).run(id, projectId, "/tmp/" + projectId, "/tmp/src.jsonl", startedAt, 5);
   }
 
@@ -141,5 +147,15 @@ describe("groups", () => {
 
     const names = listGroups(db).map((g) => g.name);
     expect(names).toEqual(["Newer", "Older", "EmptyA", "EmptyB"]);
+  });
+
+  test("listUngroupedSessions excludes subagents", () => {
+    seedProject();
+    seedSession("s1", "proj-a", "2026-07-11T09:00:00Z");
+    seedSubagent("agent-a1", "proj-a", "2026-07-11T09:05:00Z");
+
+    const { sessions, total } = listUngroupedSessions(db);
+    expect(total).toBe(1);
+    expect(sessions.map((s) => s.id)).toEqual(["s1"]);
   });
 });

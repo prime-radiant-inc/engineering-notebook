@@ -174,13 +174,17 @@ export function importDesktopGroups(db: Database, data: DesktopGroupsData): Impo
 
 /** Sessions with no group, most-recent first. */
 export function listUngroupedSessions(db: Database, limit = 200, offset = 0): { sessions: GroupSessionRow[]; total: number } {
+  // Subagents are not standalone sessions — they never belong in Ungrouped.
   const total = (db.query(
-    `SELECT COUNT(*) c FROM sessions s WHERE NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)`
+    `SELECT COUNT(*) c FROM sessions s
+     WHERE COALESCE(s.is_subagent, 0) = 0
+       AND NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)`
   ).get() as { c: number }).c;
   const sessions = db.query(
     `SELECT s.id, p.display_name, s.project_id, s.started_at, s.message_count, s.title
      FROM sessions s JOIN projects p ON p.id = s.project_id
-     WHERE NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)
+     WHERE COALESCE(s.is_subagent, 0) = 0
+       AND NOT EXISTS (SELECT 1 FROM session_groups sg WHERE sg.session_id = s.id)
      ORDER BY s.started_at DESC LIMIT ? OFFSET ?`
   ).all(limit, offset) as GroupSessionRow[];
   return { sessions, total };
