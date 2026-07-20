@@ -61,6 +61,7 @@ describe("api router", () => {
         { role: "assistant", uuid: "u1", parentUuid: null, timestamp: "t1", blocks: [{ kind: "text", content: "hi" }] },
       ],
       format: "claude",
+      compacted: false,
     });
   });
 
@@ -327,6 +328,7 @@ describe("api router", () => {
         { role: "assistant", uuid: "su1", parentUuid: null, timestamp: "st1", blocks: [{ kind: "text", content: "sub hi" }] },
       ],
       format: "claude",
+      compacted: false,
     });
   });
 

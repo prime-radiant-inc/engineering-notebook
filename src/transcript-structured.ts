@@ -30,13 +30,20 @@ function resultToString(content: unknown): string {
   return JSON.stringify(content, null, 2);
 }
 
-export function parseStructuredTranscript(jsonlText: string): { messages: StructuredMessage[]; format: StructuredFormat } {
+export function parseStructuredTranscript(
+  jsonlText: string,
+  opts: { full?: boolean } = {}
+): { messages: StructuredMessage[]; format: StructuredFormat; compacted: boolean } {
   const codexMsgs: StructuredMessage[] = [];
   const claudeMsgs: StructuredMessage[] = [];
   // uuid -> parentUuid for EVERY record (incl. filtered meta/summary/progress),
   // so the active-path resolver can bridge parent chains through them.
   const allParent = new Map<string, string | null>();
   let format: StructuredFormat = "unknown";
+  // A compacted session carries an injected "isCompactSummary" record: the full
+  // pre-compaction messages live in the same file but are pruned by active-path
+  // resolution. "full" mode returns them all and drops the injected summary.
+  let compacted = false;
 
   for (const line of jsonlText.split("\n")) {
     const t = line.trim(); if (!t) continue;
@@ -59,6 +66,7 @@ export function parseStructuredTranscript(jsonlText: string): { messages: Struct
 
     if (rec?.type !== "user" && rec?.type !== "assistant") continue;
     if (rec?.isMeta === true) continue; // matches viewer: skip isMeta nodes (parent chain already recorded above)
+    if (rec?.isCompactSummary === true) { compacted = true; if (opts.full) continue; } // in full mode, drop the injected summary
     if (rec?.message == null) continue;
     const role = rec.type as "user"|"assistant";
     const content = rec.message.content;
@@ -84,6 +92,7 @@ export function parseStructuredTranscript(jsonlText: string): { messages: Struct
     claudeMsgs.push({ role, uuid: rec.uuid, parentUuid: rec.parentUuid ?? null, timestamp: rec.timestamp, model, blocks });
   }
 
-  if (format === "codex") return { messages: codexMsgs, format };
-  return { messages: resolveActivePath(claudeMsgs, allParent), format };
+  if (format === "codex") return { messages: codexMsgs, format, compacted };
+  // Uncompacted/full: every message in file order. Compacted: the resolved active path.
+  return { messages: opts.full ? claudeMsgs : resolveActivePath(claudeMsgs, allParent), format, compacted };
 }

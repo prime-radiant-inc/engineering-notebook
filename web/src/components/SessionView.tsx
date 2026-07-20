@@ -11,18 +11,19 @@ export function SessionView({ id, onOpenSession, focusToolUseId }: { id: string;
   const [data, setData] = useState<TranscriptData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const { showThinking, showTools } = useTranscriptToggles();
+  const { showThinking, showTools, uncompacted } = useTranscriptToggles();
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     setMeta(null);
     setData(null);
-    Promise.all([getSession(id), getTranscript(id)])
+    // uncompacted (default) fetches the full transcript, incl. pre-compaction messages.
+    Promise.all([getSession(id), getTranscript(id, uncompacted)])
       .then(([m, t]) => { setMeta(m); setData(t); })
       .catch((e) => setError(String(e.message ?? e)))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, uncompacted]);
 
   const messages = useMemo(() => (data ? toParsedMessages(data.messages) : []), [data]);
   const subagentMap = useMemo(() => (meta ? toSubagentMap(meta.subagents) : {}), [meta]);

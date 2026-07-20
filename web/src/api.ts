@@ -23,6 +23,7 @@ export type StructuredMessage = {
 export type Transcript = {
   messages: StructuredMessage[];
   format: "claude" | "codex" | "unknown";
+  compacted?: boolean;
 };
 
 export type Subagent = {
@@ -94,8 +95,9 @@ export function getSession(id: string): Promise<SessionMeta> {
   return getJson<SessionMeta>(`/api/sessions/${encodeURIComponent(id)}`);
 }
 
-export function getTranscript(id: string): Promise<Transcript> {
-  return getJson<Transcript>(`/api/sessions/${encodeURIComponent(id)}/transcript`);
+export function getTranscript(id: string, full = false): Promise<Transcript> {
+  const q = full ? "?full=1" : "";
+  return getJson<Transcript>(`/api/sessions/${encodeURIComponent(id)}/transcript${q}`);
 }
 
 export function getSubagent(sessionId: string, agentId: string): Promise<Transcript> {

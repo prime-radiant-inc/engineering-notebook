@@ -138,10 +138,11 @@ export function createApiRouter(db: Database): Hono {
 
   api.get("/sessions/:id/transcript", (c) => {
     const id = c.req.param("id");
+    const full = c.req.query("full") === "1"; // uncompacted: every message, incl. pre-compaction
     const row = db.query("SELECT source_path FROM sessions WHERE id = ?").get(id) as { source_path: string } | null;
     if (!row) return c.json({ error: "session not found" }, 404);
     if (!row.source_path || !existsSync(row.source_path)) return c.json({ error: "source unavailable" }, 410);
-    return c.json(parseStructuredTranscript(readFileSync(row.source_path, "utf-8")));
+    return c.json(parseStructuredTranscript(readFileSync(row.source_path, "utf-8"), { full }));
   });
 
   api.get("/sessions/:id", (c) => {

@@ -22,7 +22,28 @@ test("groups blocks under messages, preserving ids and threading", () => {
 });
 
 test("empty → no messages, unknown", () => {
-  expect(parseStructuredTranscript("")).toEqual({ messages: [], format: "unknown" });
+  expect(parseStructuredTranscript("")).toEqual({ messages: [], format: "unknown", compacted: false });
+});
+
+test("compacted session: active path prunes pre-compaction; full mode returns all + drops the summary", () => {
+  // Pre-compaction branch (u1,u2) is its own root; compaction injects a NEW root
+  // summary whose post-compaction branch (p1) has later timestamps, so active-path
+  // resolution follows it and PRUNES the pre-compaction messages. Full mode returns
+  // every real message (recovering u1,u2) and omits the injected summary.
+  const lines = [
+    JSON.stringify({ type: "user", uuid: "u1", parentUuid: null, timestamp: "2026-01-01T00:00:00Z", message: { content: "early work" } }),
+    JSON.stringify({ type: "assistant", uuid: "u2", parentUuid: "u1", timestamp: "2026-01-01T00:00:01Z", message: { content: [{ type: "text", text: "early reply" }] } }),
+    JSON.stringify({ type: "user", uuid: "sum", parentUuid: null, isCompactSummary: true, timestamp: "2026-01-01T00:00:02Z", message: { content: "This session is being continued… Summary: …" } }),
+    JSON.stringify({ type: "assistant", uuid: "p1", parentUuid: "sum", timestamp: "2026-01-01T00:00:03Z", message: { content: [{ type: "text", text: "post-compaction reply" }] } }),
+  ].join("\n");
+
+  const active = parseStructuredTranscript(lines);
+  expect(active.compacted).toBe(true);
+  expect(active.messages.map((m) => m.uuid)).toEqual(["sum", "p1"]); // pre-compaction pruned; summary kept
+
+  const full = parseStructuredTranscript(lines, { full: true });
+  expect(full.compacted).toBe(true);
+  expect(full.messages.map((m) => m.uuid)).toEqual(["u1", "u2", "p1"]); // pre-compaction recovered, summary dropped
 });
 
 test("resolves the active branch through parentUuid (abandoned forks dropped)", () => {

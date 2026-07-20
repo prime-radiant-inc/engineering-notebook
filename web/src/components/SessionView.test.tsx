@@ -84,6 +84,21 @@ describe("SessionView (ported viewer)", () => {
     expect(onOpen).toHaveBeenCalledWith("agent-ag1");
   });
 
+  test("defaults to the uncompacted (full) transcript; the toggle switches to compacted and back", async () => {
+    const getT = vi.spyOn(api, "getTranscript").mockResolvedValue(transcript);
+    vi.spyOn(api, "getSession").mockResolvedValue(meta);
+
+    renderView("s1", vi.fn());
+    await screen.findByText("the answer");
+    // Default is uncompacted → full transcript requested.
+    expect(getT).toHaveBeenLastCalledWith("s1", true);
+
+    fireEvent.click(screen.getByRole("button", { name: "View compacted" }));
+    await waitFor(() => expect(getT).toHaveBeenLastCalledWith("s1", false));
+    // Button label flips to offer switching back.
+    expect(screen.getByRole("button", { name: "View uncompacted" })).toBeInTheDocument();
+  });
+
   test("subagent spawn link is visible even with tools hidden, and it navigates", async () => {
     vi.spyOn(api, "getSession").mockResolvedValue(meta);
     vi.spyOn(api, "getTranscript").mockResolvedValue(transcript);
