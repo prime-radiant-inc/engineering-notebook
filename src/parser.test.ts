@@ -119,6 +119,14 @@ describe("parseSession", () => {
     expect(session.endedAt).toBeTruthy();
   });
 
+  test("subagent file links to its parent session id", () => {
+    // The parent's sessionId appears in every record; it is the link back to
+    // the originating session (but must NOT trigger continuation record-skipping).
+    const session = parseSession(subagentFixturePath);
+    expect(session.parentSessionId).toBe("b013d855-ab92-4740-9b0a-385abb8a1d8c");
+    expect(session.messages.length).toBe(3);
+  });
+
   test("cleans command-message tags from user messages", () => {
     const session = parseSession(commandFixturePath);
     const userMessages = session.messages.filter((m) => m.role === "user");

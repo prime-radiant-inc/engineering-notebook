@@ -75,6 +75,7 @@ export function initDb(dbPath: string): Database {
 
     CREATE INDEX IF NOT EXISTS idx_session_groups_group ON session_groups(group_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
     CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
     CREATE INDEX IF NOT EXISTS idx_journal_project ON journal_entries(project_id);
