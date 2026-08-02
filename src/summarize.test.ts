@@ -300,3 +300,48 @@ describe("upsertJournalEntry model attribution", () => {
     expect(row.model_used).toBe("gemma-4");
   });
 });
+
+describe("re-summarizing an explicitly named date", () => {
+  let tempDir: string;
+  let db: ReturnType<typeof initDb>;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "notebook-resummarize-"));
+    db = initDb(join(tempDir, "test.db"));
+
+    db.exec(`
+      INSERT INTO projects (id, path, display_name, session_count)
+      VALUES ('myapp', '/test/myapp', 'My App', 1);
+
+      INSERT INTO sessions (id, project_id, project_path, source_path, started_at, ended_at, message_count, ingested_at)
+      VALUES ('s-1', 'myapp', '/test/myapp', '/tmp/s1.jsonl', '2026-02-20T10:00:00Z', '2026-02-20T11:00:00Z', 2, datetime('now'));
+
+      INSERT INTO conversations (session_id, conversation_markdown, extracted_at)
+      VALUES ('s-1', '**User (2026-02-20 10:00):** Do the thing\n**Claude (2026-02-20 10:05):** Done.', datetime('now'));
+
+      INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, generated_at, model_used)
+      VALUES ('2026-02-20', 'myapp', '["s-1"]', 'Old headline', 'Stale summary', '[]', datetime('now'), 'test-model');
+    `);
+  });
+
+  afterEach(() => {
+    closeDb();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("includes an already-summarized group when its date is named explicitly", () => {
+    // A day that is still being worked on has a stale entry; naming the date is
+    // a deliberate request to regenerate it.
+    const groups = groupSessionsByDateAndProject(db, "2026-02-20");
+    expect(groups.length).toBe(1);
+    expect(groups[0]!.date).toBe("2026-02-20");
+  });
+
+  test("still skips already-summarized groups when no date is named", () => {
+    expect(groupSessionsByDateAndProject(db).length).toBe(0);
+  });
+
+  test("does not return other dates when one date is named", () => {
+    expect(groupSessionsByDateAndProject(db, "2026-02-19").length).toBe(0);
+  });
+});

@@ -224,16 +224,18 @@ export function groupSessionsByDateAndProject(
     }
   }
 
-  // Filter out already-summarized combos
   const result: SessionGroup[] = [];
   for (const group of groups.values()) {
-    const key = `${group.date}|${group.projectId}`;
-    if (!summarized.has(key)) {
-      // Apply filterDate check against logical date
-      if (!filterDate || group.date === filterDate) {
-        result.push(group);
-      }
-    }
+    // Apply the date filter against the logical date.
+    if (filterDate && group.date !== filterDate) continue;
+
+    // Skip combos that already have an entry — unless the caller named the date
+    // outright, which is a deliberate request to regenerate it. A day still being
+    // worked on gets summarized long before it is over, and without this there is
+    // no way to refresh it short of deleting the row by hand.
+    if (!filterDate && summarized.has(`${group.date}|${group.projectId}`)) continue;
+
+    result.push(group);
   }
 
   return result;
