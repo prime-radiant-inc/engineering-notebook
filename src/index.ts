@@ -37,6 +37,30 @@ switch (command) {
       }
     }
 
+    // Stage OpenCode sessions, which live in a SQLite DB rather than one file
+    // per session, into a scannable directory of JSONL files.
+    if (config.opencode?.enabled) {
+      const { syncOpenCodeSessions, cliRunner } = await import("./opencode");
+      const stagingDir = expandPath(config.opencode.staging_dir);
+      console.log("Syncing OpenCode sessions...");
+      try {
+        const ocResult = await syncOpenCodeSessions(stagingDir, cliRunner(), {
+          maxCount: config.opencode.max_count,
+        });
+        console.log(
+          `  OpenCode: ${ocResult.written} exported, ${ocResult.skipped} unchanged`
+        );
+        for (const err of ocResult.errors.slice(0, 5)) {
+          console.log(`  ✗ ${err}`);
+        }
+        sources.push(stagingDir);
+      } catch (err) {
+        console.log(
+          `  ✗ OpenCode sync failed: ${err instanceof Error ? err.message : err}`
+        );
+      }
+    }
+
     console.log(`Scanning ${sources.length} source(s)...`);
     const files = scanSources(sources, config.exclude);
     console.log(`Found ${files.length} session file(s)`);
@@ -73,9 +97,11 @@ switch (command) {
     }
 
     const { summarizeAll } = await import("./summarize");
+    const { providerModel } = await import("./llm");
+    console.log(`Summarizing with ${providerModel(config.summary_provider)}...`);
     const result = await summarizeAll(db, filterDate, filterProject, (done, total, group) => {
       console.log(`[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`);
-    }, config.day_start_hour, config.summary_instructions);
+    }, config.day_start_hour, config.summary_instructions, config.summary_provider);
 
     console.log(`Summarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`);
     if (result.skipped > 0) {

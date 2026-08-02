@@ -127,7 +127,10 @@ export function ingestSessions(
           session.projectPath,
           session.projectName
         );
-        const isSubagent = file.includes("/subagents/") ? 1 : 0;
+        // Formats that state it outright win; otherwise fall back to Claude
+        // Code's on-disk convention of nesting subagents under /subagents/.
+        const isSubagent =
+          (session.isSubagent ?? file.includes("/subagents/")) ? 1 : 0;
         insertSession.run(
           session.sessionId,
           session.parentSessionId,
