@@ -408,7 +408,7 @@ export async function summarizeGroup(
     try {
       const row = db.query("SELECT title, COALESCE(is_subagent, 0) AS sub FROM sessions WHERE id = ?").get(sid) as
         | { title: string | null; sub: number } | null;
-      if (row && !row.title && !row.sub) await titleSession(db, sid);
+      if (row && !row.title && !row.sub) await titleSession(db, sid, provider);
     } catch {
       // title generation is best-effort; never fail a summary over it
     }

@@ -115,7 +115,7 @@ Config lives at `~/.config/engineering-notebook/config.json`:
 | `remote_sources`       | SSH remote sources to sync before ingesting                                              | `[]`                                           |
 | `auto_sync_interval`   | Seconds between auto-syncs when serving                                                  | `60`                                           |
 | `opencode`             | OpenCode session import (opt-in)                                                         | absent                                         |
-| `summary_provider`     | Which model writes journal summaries                                                     | Claude Haiku                                   |
+| `summary_provider`     | Which model writes summaries and session titles                                          | Claude Haiku                                   |
 
 ### OpenCode sessions
 
@@ -145,8 +145,8 @@ Code work in the same repo on the same day lands in one journal entry.
 
 ### Choosing a model
 
-Journal summaries are written by Claude Haiku through the Agent SDK by default,
-which needs no API key. Any OpenAI-compatible endpoint can be used
+Journal summaries and session titles are written by Claude Haiku through the
+Agent SDK by default, which needs no API key. Any OpenAI-compatible endpoint can be used
 instead — including a local llama.cpp server:
 
 ```json

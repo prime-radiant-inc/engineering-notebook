@@ -29,7 +29,7 @@ export type Config = {
   auto_sync_interval: number;
   /** Optional and absent by default: the OpenCode adapter is opt-in. */
   opencode?: OpenCodeConfig;
-  /** Which model writes journal entries. Claude by default. */
+  /** Which model writes journal entries and session titles. Claude by default. */
   summary_provider?: SummaryProvider;
 };
 

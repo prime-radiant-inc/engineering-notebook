@@ -1,5 +1,5 @@
 /**
- * Model provider for journal summarization.
+ * Model provider for journal summarization and session titling.
  *
  * Defaults to Claude via the Agent SDK. Any OpenAI-compatible endpoint can be
  * used instead — including a local llama.cpp server — by configuring a

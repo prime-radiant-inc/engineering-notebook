@@ -193,6 +193,7 @@ switch (command) {
       console.log("Generating titles for Claude Code sessions without one…");
       const { generated, skipped } = await backfillTitles(db, {
         limit,
+        provider: config.summary_provider,
         onProgress: (done, total, title) => console.log(`  [${done}/${total}] ${title}`),
       });
       console.log(`Generated ${generated}, skipped ${skipped}.`);
