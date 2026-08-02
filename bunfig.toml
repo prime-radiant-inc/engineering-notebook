@@ -1,0 +1,6 @@
+# Bun's test runner owns the backend suite only. The web/ tests are React
+# components that need a DOM, which is configured for vitest in web/vite.config.ts
+# and is not visible to `bun test` — without this scope a bare `bun test` collects
+# them and fails with "document is not defined". Run them with `bun run test:web`.
+[test]
+root = "src"
