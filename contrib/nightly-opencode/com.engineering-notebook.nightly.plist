@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template. Replace __HOME__ with your home directory before installing:
+
+    sed "s|__HOME__|$HOME|g" com.engineering-notebook.nightly.plist \
+      > ~/Library/LaunchAgents/com.engineering-notebook.nightly.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.engineering-notebook.nightly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__HOME__/.config/engineering-notebook/summarize-opencode-day.sh</string>
+    </array>
+
+    <!--
+      05:05, just after day_start_hour (default 5) closes the previous logical
+      day. Running at midnight instead would miss work done between 00:00 and
+      05:00, which belongs to the day that is being summarized.
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.config/engineering-notebook/nightly.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.config/engineering-notebook/nightly.launchd.log</string>
+</dict>
+</plist>
