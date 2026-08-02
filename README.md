@@ -71,10 +71,16 @@ Generate LLM summaries for ingested sessions.
 
 ```sh
 engineering-notebook summarize --all                      # summarize everything unsummarized
-engineering-notebook summarize --date 2026-02-22          # summarize a specific date
+engineering-notebook summarize --date 2026-02-22          # summarize (or re-summarize) a date
 engineering-notebook summarize --project myapp            # summarize a specific project
 engineering-notebook summarize --date 2026-02-22 --project myapp  # both filters
 ```
+
+`--all` only visits dates that have no entry yet, so re-running it never rewrites
+existing entries. Naming a date with `--date` **does** regenerate it, replacing
+whatever is there. That is what you want for the current day: a day gets
+summarized while you are still working, and re-running `--date today` folds in
+everything since. Pair it with `--project` to regenerate a single project's entry.
 
 ### `engineering-notebook serve`
 
