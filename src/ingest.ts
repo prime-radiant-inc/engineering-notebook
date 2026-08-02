@@ -104,8 +104,11 @@ export function ingestSessions(
         continue;
       }
 
+      // A session with no start time cannot be placed on a date, so it is as
+      // unusable as one with no messages. Counted as empty because #16 derives
+      // `skipped` from the specific buckets rather than tracking it directly.
       if (!session.startedAt) {
-        skipped++;
+        empty++;
         continue;
       }
 
