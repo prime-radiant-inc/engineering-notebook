@@ -114,6 +114,57 @@ Config lives at `~/.config/engineering-notebook/config.json`:
 | `summary_instructions` | Custom instructions appended to the LLM summarization prompt                             | `""`                                           |
 | `remote_sources`       | SSH remote sources to sync before ingesting                                              | `[]`                                           |
 | `auto_sync_interval`   | Seconds between auto-syncs when serving                                                  | `60`                                           |
+| `opencode`             | OpenCode session import (opt-in)                                                         | absent                                         |
+| `summary_provider`     | Which model writes journal summaries                                                     | Claude Haiku                                   |
+
+### OpenCode sessions
+
+OpenCode keeps its sessions in a single SQLite database rather than one file per
+session, so they cannot be scanned like Claude Code and Codex sources. Enabling
+this block exports each session to a staging directory of JSONL files during
+`ingest`, which the normal scanner then picks up:
+
+```json
+{
+  "opencode": {
+    "enabled": true,
+    "staging_dir": "~/.cache/engineering-notebook/opencode",
+    "max_count": 200
+  }
+}
+```
+
+Sessions are enumerated from OpenCode's database (`opencode session list` only
+reports the current directory's project, so it cannot see them all) and their
+transcripts are exported with `opencode export`. A manifest of last-seen update
+times keeps repeat syncs cheap — only changed sessions are re-exported. Omit
+`max_count` to take everything.
+
+Projects are keyed off each session's working directory, so OpenCode and Claude
+Code work in the same repo on the same day lands in one journal entry.
+
+### Choosing a model
+
+Journal summaries are written by Claude Haiku through the Agent SDK by default,
+which needs no API key. Any OpenAI-compatible endpoint can be used
+instead — including a local llama.cpp server:
+
+```json
+{
+  "summary_provider": {
+    "type": "openai",
+    "base_url": "http://your-host:8001/v1",
+    "model": "gemma-4",
+    "api_key_env": "SPARK_API_KEY",
+    "max_tokens": 4000
+  }
+}
+```
+
+`api_key_env` names the environment variable holding the key — the key itself is
+never stored in the config file. Reasoning models spend completion tokens
+thinking before emitting any content, so keep `max_tokens` generous (it defaults
+to 4000); too small a budget returns an empty response rather than a summary.
 
 ### Remote Sources
 

@@ -14,6 +14,65 @@ const cursorEpochFixturePath = join(
   import.meta.dir,
   "../tests/fixtures/cursor/1700000000000/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl"
 );
+const opencodeFixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-session-1.jsonl");
+const opencodeSubagentFixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-subagent.jsonl");
+
+describe("parseSession (OpenCode format)", () => {
+  test("extracts session metadata from the opencode_meta record", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.sessionId).toBe("ses_abc123");
+    expect(session.projectPath).toBe("/Users/jesse/projects/myapp");
+    expect(session.projectName).toBe("myapp");
+    expect(session.version).toBe("1.18.0");
+    expect(session.assistantDisplayName).toBe("OpenCode");
+  });
+
+  test("parses user and assistant messages", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.messages.length).toBe(3);
+    expect(session.messages[0]!.role).toBe("user");
+    expect(session.messages[0]!.text).toBe("Add retry logic to the fetch helper");
+    expect(session.messages[1]!.role).toBe("assistant");
+  });
+
+  test("uses record timestamps for session bounds", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.startedAt).toBe("2026-07-06T14:22:31.718Z");
+    expect(session.endedAt).toBe("2026-07-06T14:25:10.000Z");
+  });
+
+  test("leaves parentSessionId null for a root session", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.parentSessionId).toBeNull();
+  });
+
+  test("sets parentSessionId for a subagent session", () => {
+    const session = parseSession(opencodeSubagentFixturePath);
+    expect(session.parentSessionId).toBe("ses_abc123");
+  });
+
+  test("flags a session with a parent as a subagent", () => {
+    const session = parseSession(opencodeSubagentFixturePath);
+    expect(session.isSubagent).toBe(true);
+  });
+
+  test("does not flag a root session as a subagent", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.isSubagent).toBe(false);
+  });
+
+  test("leaves isSubagent undefined for Claude Code sessions so path detection still applies", () => {
+    // Claude Code records a parentSessionId for continuations as well as
+    // subagents, so the parser must not claim to know which this is.
+    const session = parseSession(fixturePath);
+    expect(session.isSubagent).toBeUndefined();
+  });
+
+  test("does not misdetect OpenCode sessions as Codex", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.assistantDisplayName).not.toBe("Codex");
+  });
+});
 
 describe("parseSession", () => {
   test("extracts session metadata", () => {

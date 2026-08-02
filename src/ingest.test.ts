@@ -147,6 +147,30 @@ describe("ingestSessions", () => {
     expect(session?.is_subagent).toBe(0);
   });
 
+  test("marks an OpenCode session with a parent as is_subagent=1 despite a flat path", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-subagent.jsonl");
+    const stagingDir = join(tempDir, "opencode-staging");
+    mkdirSync(stagingDir, { recursive: true });
+    const sessionFile = join(stagingDir, "ses_child9.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const session = db.query("SELECT is_subagent FROM sessions").get() as { is_subagent: number } | null;
+    expect(session?.is_subagent).toBe(1);
+  });
+
+  test("marks a root OpenCode session as is_subagent=0", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-session-1.jsonl");
+    const stagingDir = join(tempDir, "opencode-staging");
+    mkdirSync(stagingDir, { recursive: true });
+    const sessionFile = join(stagingDir, "ses_abc123.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const session = db.query("SELECT is_subagent FROM sessions").get() as { is_subagent: number } | null;
+    expect(session?.is_subagent).toBe(0);
+  });
+
   test("ingests a Codex session file into the database", () => {
     const fixturePath = join(import.meta.dir, "../tests/fixtures/test-codex-session-1.jsonl");
     const codexDir = join(tempDir, "2026", "02", "24");
