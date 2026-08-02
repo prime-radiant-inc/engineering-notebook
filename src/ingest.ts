@@ -60,10 +60,13 @@ export function scanSources(
 export function ingestSessions(
   files: string[],
   db: Database,
-  force = false
-): { ingested: number; skipped: number; errors: string[] } {
-  let ingested = 0;
-  let skipped = 0;
+  force = false,
+  onProgress?: (done: number, total: number) => void
+): {
+  ingested: number; skipped: number; errors: string[];
+  alreadyIngested: number; empty: number; duplicateId: number; totalMessages: number;
+} {
+  let ingested = 0, alreadyIngested = 0, empty = 0, duplicateId = 0, totalMessages = 0;
   const errors: string[] = [];
 
   const checkStmt = db.query("SELECT id FROM sessions WHERE source_path = ?");
@@ -84,30 +87,35 @@ export function ingestSessions(
   const deleteConvo = db.prepare(`DELETE FROM conversations WHERE session_id = ?`);
   const deleteSession = db.prepare(`DELETE FROM sessions WHERE id = ?`);
 
-  for (const file of files) {
-    if (!force) {
-      const existing = checkStmt.get(file);
-      if (existing) {
-        skipped++;
-        continue;
-      }
+  for (let i = 0; i < files.length; i++) {
+    onProgress?.(i, files.length);
+    const file = files[i]!;
+
+    if (!force && checkStmt.get(file)) {
+      alreadyIngested++;
+      continue;
     }
 
     try {
       const session = parseSession(file);
 
       if (session.messageCount === 0) {
-        skipped++;
+        empty++;
+        continue;
+      }
+
+      // A session with no start time cannot be placed on a date, so it is as
+      // unusable as one with no messages. Counted as empty because #16 derives
+      // `skipped` from the specific buckets rather than tracking it directly.
+      if (!session.startedAt) {
+        empty++;
         continue;
       }
 
       // Skip if session ID already exists (e.g., same session in multiple project dirs)
-      if (!force) {
-        const existingById = checkSessionId.get(session.sessionId);
-        if (existingById) {
-          skipped++;
-          continue;
-        }
+      if (!force && checkSessionId.get(session.sessionId)) {
+        duplicateId++;
+        continue;
       }
 
       const projectId = session.projectName;
@@ -122,7 +130,10 @@ export function ingestSessions(
           session.projectPath,
           session.projectName
         );
-        const isSubagent = file.includes("/subagents/") ? 1 : 0;
+        // Formats that state it outright win; otherwise fall back to Claude
+        // Code's on-disk convention of nesting subagents under /subagents/.
+        const isSubagent =
+          (session.isSubagent ?? file.includes("/subagents/")) ? 1 : 0;
         insertSession.run(
           session.sessionId,
           session.parentSessionId,
@@ -140,10 +151,16 @@ export function ingestSessions(
       })();
 
       ingested++;
+      totalMessages += session.messageCount;
     } catch (err) {
       errors.push(`${file}: ${err}`);
     }
   }
+  onProgress?.(files.length, files.length);
+
+  // Link subagents to their originating session before recomputing aggregates,
+  // so re-homed subagents are counted under the correct project.
+  relinkSubagents(db);
 
   // Update project aggregate fields
   db.exec(`
@@ -153,5 +170,43 @@ export function ingestSessions(
       session_count = (SELECT COUNT(*) FROM sessions WHERE sessions.project_id = projects.id)
   `);
 
-  return { ingested, skipped, errors };
+  return {
+    ingested, skipped: alreadyIngested + empty + duplicateId, errors,
+    alreadyIngested, empty, duplicateId, totalMessages,
+  };
+}
+
+/**
+ * Link each subagent session to the session that spawned it and re-home it to
+ * that session's project.
+ *
+ * The parent session id is taken from `parent_session_id` when present,
+ * otherwise recovered from the source path
+ * (`<project>/<parentSessionId>/subagents/agent-*.jsonl`). When the parent
+ * session is known, the subagent's `project_id` is rewritten to match it;
+ * an unknown parent leaves the project untouched. Order-independent and
+ * idempotent, so it also backfills rows ingested before the link was recorded.
+ */
+export function relinkSubagents(db: Database): void {
+  const subs = db
+    .query("SELECT id, parent_session_id, source_path FROM sessions WHERE is_subagent = 1")
+    .all() as { id: string; parent_session_id: string | null; source_path: string }[];
+  const setParent = db.prepare("UPDATE sessions SET parent_session_id = ? WHERE id = ?");
+  const setProject = db.prepare("UPDATE sessions SET project_id = ? WHERE id = ?");
+  const parentProject = db.prepare("SELECT project_id FROM sessions WHERE id = ?");
+
+  db.transaction(() => {
+    for (const s of subs) {
+      let parentId = s.parent_session_id;
+      if (!parentId) {
+        // <project>/<parentSessionId>/subagents/agent-*.jsonl
+        const m = /\/([^/]+)\/subagents\//.exec(s.source_path);
+        parentId = m ? m[1]! : null;
+        if (parentId) setParent.run(parentId, s.id);
+      }
+      if (!parentId) continue;
+      const parent = parentProject.get(parentId) as { project_id: string } | null;
+      if (parent) setProject.run(parent.project_id, s.id);
+    }
+  })();
 }

@@ -82,3 +82,39 @@ describe("expandPath", () => {
     expect(expandPath("~")).toBe("~");
   });
 });
+
+describe("opencode config", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "en-config-oc-"));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("is absent by default so the adapter stays opt-in", () => {
+    const config = loadConfig(join(tempDir, "nonexistent.json"));
+    expect(config.opencode).toBeUndefined();
+  });
+
+  test("round-trips an opencode block from the config file", () => {
+    const configPath = join(tempDir, "config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        opencode: {
+          enabled: true,
+          staging_dir: "~/.cache/engineering-notebook/opencode",
+          max_count: 50,
+        },
+      })
+    );
+
+    const loaded = loadConfig(configPath);
+    expect(loaded.opencode?.enabled).toBe(true);
+    expect(loaded.opencode?.staging_dir).toBe("~/.cache/engineering-notebook/opencode");
+    expect(loaded.opencode?.max_count).toBe(50);
+  });
+});

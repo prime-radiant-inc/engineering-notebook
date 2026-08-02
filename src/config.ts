@@ -1,12 +1,21 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, join } from "path";
 import { homedir } from "os";
+import type { SummaryProvider } from "./llm";
 
 export type RemoteSource = {
   name: string;
   host: string;
   path: string;
   enabled: boolean;
+};
+
+export type OpenCodeConfig = {
+  enabled: boolean;
+  /** Where exported sessions are staged for the scanner. */
+  staging_dir: string;
+  /** Limit to the N most recent sessions; omit for all. */
+  max_count?: number;
 };
 
 export type Config = {
@@ -18,6 +27,10 @@ export type Config = {
   summary_instructions: string;
   remote_sources: RemoteSource[];
   auto_sync_interval: number;
+  /** Optional and absent by default: the OpenCode adapter is opt-in. */
+  opencode?: OpenCodeConfig;
+  /** Which model writes journal entries and session titles. Claude by default. */
+  summary_provider?: SummaryProvider;
 };
 
 export function defaultConfig(): Config {

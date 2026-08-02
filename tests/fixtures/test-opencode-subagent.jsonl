@@ -1,0 +1,3 @@
+{"type":"opencode_meta","timestamp":"2026-07-06T15:00:00.000Z","payload":{"id":"ses_child9","cwd":"/Users/jesse/projects/myapp","title":"Search the codebase","version":"1.18.0","parent_id":"ses_abc123","model":"spark/qwen3-coder"}}
+{"type":"user","timestamp":"2026-07-06T15:00:01.000Z","message":{"role":"user","content":"Find all callers of fetchWithRetry"}}
+{"type":"assistant","timestamp":"2026-07-06T15:00:09.000Z","message":{"role":"assistant","content":"Three callers, all in src/net/."}}

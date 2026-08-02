@@ -7,12 +7,26 @@ import { renderSearch, renderSearchResults } from "./views/search";
 import { renderSettings, renderRemoteSourceCard, renderSyncStatus } from "./views/settings";
 import { renderSessionDetail } from "./views/session";
 import { renderCalendarPage, renderIcalFeed, weekMonday } from "./views/calendar";
+import { renderGroupsIndex, renderGroupDetail } from "./views/groups";
+import { createGroup, renameGroup, deleteGroup, assignSession } from "../groups";
 import { escapeHtml } from "./views/helpers";
 import { loadConfig, saveConfig, resolveConfigPath, type RemoteSource } from "../config";
 import type { SyncManager } from "../sync";
+import { createApiRouter } from "./api";
+import { serveStatic } from "hono/bun";
 
-export function createApp(db: Database, syncManager: SyncManager): Hono {
+export function createApp(db: Database, syncManager: SyncManager, opts: { react?: boolean } = {}): Hono {
   const app = new Hono();
+
+  // JSON API for the React frontend (additive; legacy routes below unchanged)
+  app.route("/api", createApiRouter(db));
+
+  // React mode: serve the built SPA from web/dist and skip the legacy views.
+  if (opts.react) {
+    app.use("/*", serveStatic({ root: "./web/dist" }));
+    app.get("/*", serveStatic({ path: "./web/dist/index.html" }));
+    return app;
+  }
 
   // ──────────────────────────────────────────
   // Full-page routes
@@ -74,7 +88,9 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   // Session detail — show in journal context
   app.get("/session/:id", (c) => {
     const sessionId = c.req.param("id");
-    const panel3 = renderSessionDetail(db, sessionId);
+    const showThinking = c.req.query("thinking") === "1";
+    const showTools = c.req.query("tools") === "1";
+    const panel3 = renderSessionDetail(db, sessionId, { showThinking, showTools });
     // Find the date for this session to select it in the index
     const session = db.query(`SELECT date(started_at) as date FROM sessions WHERE id = ?`).get(sessionId) as { date: string } | null;
     const date = session?.date;
@@ -219,12 +235,12 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
       }
       // Skipped or no groups — show a muted card
       return c.html(`<div class="entry-card" style="opacity: 0.5;">
-        <div class="entry-label">${date}</div>
+        <div class="entry-label">${escapeHtml(date)}</div>
         <div class="entry-summary" style="color: var(--text-ghost); font-style: italic;">No journal-worthy sessions on this date.</div>
       </div>`);
     } catch (err) {
       return c.html(`<div class="entry-card" style="opacity: 0.5;">
-        <div class="entry-label">${date}</div>
+        <div class="entry-label">${escapeHtml(date)}</div>
         <div class="entry-summary" style="color: #b91c1c; font-style: italic;">Summary failed: ${escapeHtml(String(err))}</div>
       </div>`);
     }
@@ -272,6 +288,74 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
       return c.html(`<span class="connection-error">${escapeHtml(error)}</span>`);
     }
     return c.html(`<span class="connection-ok">Connected</span>`);
+  });
+
+  // ──────────────────────────────────────────
+  // Groups
+  // ──────────────────────────────────────────
+
+  app.get("/groups", (c) => {
+    const error = c.req.query("error") || undefined;
+    return c.html(renderLayout("Groups — Engineering Notebook", {
+      body: renderGroupsIndex(db, error),
+      activeTab: "groups",
+    }));
+  });
+
+  app.get("/groups/:id", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const body = isNaN(id) ? null : renderGroupDetail(db, id);
+    if (!body) return c.text("Group not found", 404);
+    return c.html(renderLayout("Group — Engineering Notebook", {
+      body,
+      activeTab: "groups",
+    }));
+  });
+
+  app.post("/groups", async (c) => {
+    const form = await c.req.parseBody();
+    try {
+      createGroup(db, (form.name as string) || "");
+    } catch (err) {
+      return c.html(renderLayout("Groups — Engineering Notebook", {
+        body: renderGroupsIndex(db, String(err instanceof Error ? err.message : err)),
+        activeTab: "groups",
+      }));
+    }
+    return c.redirect("/groups");
+  });
+
+  app.post("/groups/:id/rename", async (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const form = await c.req.parseBody();
+    try {
+      renameGroup(db, id, (form.name as string) || "");
+    } catch (err) {
+      return c.html(renderLayout("Groups — Engineering Notebook", {
+        body: renderGroupsIndex(db, String(err instanceof Error ? err.message : err)),
+        activeTab: "groups",
+      }));
+    }
+    return c.redirect(`/groups/${id}`);
+  });
+
+  app.post("/groups/:id/delete", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!isNaN(id)) deleteGroup(db, id);
+    return c.redirect("/groups");
+  });
+
+  app.post("/sessions/:id/group", async (c) => {
+    const sessionId = c.req.param("id");
+    const form = await c.req.parseBody();
+    const raw = (form.group_id as string) || "";
+    const groupId = raw === "" ? null : parseInt(raw, 10);
+    try {
+      assignSession(db, sessionId, groupId === null || isNaN(groupId) ? null : groupId);
+    } catch {
+      // invalid/stale group_id (e.g. group deleted in another tab) — ignore, don't 500
+    }
+    return c.redirect(`/session/${encodeURIComponent(sessionId)}`);
   });
 
   return app;

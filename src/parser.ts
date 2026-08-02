@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import { basename } from "path";
 
 export type MessageRole = "user" | "assistant";
@@ -22,6 +22,12 @@ export type ParsedSession = {
   endedAt: string | null;
   messages: ParsedMessage[];
   messageCount: number;
+  /**
+   * Whether this session is a subagent run, when the format states it
+   * outright. Left undefined for Claude Code, whose parentSessionId covers
+   * continuations too and so is decided from the file path instead.
+   */
+  isSubagent?: boolean;
   toMarkdown: () => string;
 };
 
@@ -41,6 +47,19 @@ type RawRecord = {
   isCompactSummary?: boolean;
 };
 
+type OpenCodeMetaRecord = {
+  type: string;
+  timestamp?: string;
+  payload?: {
+    id?: string;
+    cwd?: string;
+    title?: string;
+    version?: string;
+    parent_id?: string | null;
+    model?: string | null;
+  };
+};
+
 type CodexRecord = {
   type: string;
   timestamp?: string;
@@ -58,6 +77,13 @@ type CodexRecord = {
       type?: string;
       text?: string;
     }>;
+  };
+};
+
+type CursorRecord = {
+  role?: string;
+  message?: {
+    content: string | ContentBlock[];
   };
 };
 
@@ -83,6 +109,17 @@ function userDisplayNameFromPath(projectPath: string): string {
   if (windowsHomeMatch?.[1]) return windowsHomeMatch[1];
 
   return "User";
+}
+
+/** Cursor stores no cwd. Derive the project from the encoded directory name
+ *  that sits immediately before `agent-transcripts/` in the file path. The name
+ *  is the raw dash-encoded string and is intentionally NOT decoded — the
+ *  encoding is lossy (both `/` and `.` collapse to `-`). See README caveats. */
+function cursorProjectFromPath(filePath: string): string {
+  const parts = filePath.split("/").filter(Boolean);
+  const idx = parts.indexOf("agent-transcripts");
+  if (idx > 0) return parts[idx - 1]!;
+  return parts.length >= 2 ? parts[parts.length - 2]! : "cursor";
 }
 
 /** Format a UTC ISO timestamp to HH:MM using UTC hours/minutes */
@@ -165,6 +202,7 @@ export function parseSession(filePath: string): ParsedSession {
 
   let firstRecordSessionId: string | null = null;
   let parentSessionId: string | null = null;
+  let continuationParentId: string | null = null;
   let projectPath = "";
   let gitBranch: string | null = null;
   let version: string | null = null;
@@ -172,6 +210,8 @@ export function parseSession(filePath: string): ParsedSession {
   let lastTimestamp: string | null = null;
   const messages: ParsedMessage[] = [];
   let codexFormat = false;
+  let cursorFormat = false;
+  let openCodeFormat = false;
   let assistantDisplayName = "Claude";
 
   for (const line of lines) {
@@ -180,6 +220,27 @@ export function parseSession(filePath: string): ParsedSession {
       parsed = JSON.parse(line);
     } catch {
       continue; // skip malformed lines
+    }
+
+    // OpenCode sessions are staged by the adapter as an `opencode_meta` header
+    // followed by Claude-Code-shaped message records, so only the header needs
+    // handling here — the message records fall through to the normal path.
+    const openCodeRecord = parsed as OpenCodeMetaRecord;
+    if (openCodeRecord.type === "opencode_meta") {
+      assistantDisplayName = "OpenCode";
+      openCodeFormat = true;
+
+      if (openCodeRecord.timestamp) {
+        if (!firstTimestamp) firstTimestamp = openCodeRecord.timestamp;
+        lastTimestamp = openCodeRecord.timestamp;
+      }
+
+      const payload = openCodeRecord.payload;
+      if (payload?.id) sessionId = payload.id;
+      if (payload?.cwd && !projectPath) projectPath = payload.cwd;
+      if (payload?.version && !version) version = payload.version;
+      if (payload?.parent_id) parentSessionId = payload.parent_id;
+      continue;
     }
 
     const codexRecord = parsed as CodexRecord;
@@ -225,19 +286,44 @@ export function parseSession(filePath: string): ParsedSession {
 
     const record = parsed as RawRecord;
 
+    // Cursor format: a top-level `role` with a `message`, and no `type` field.
+    // Content blocks share Claude's shape, so reuse the existing extractors.
+    // Project and timestamps are derived after the loop (Cursor records carry
+    // neither).
+    if (!record.type && record.message) {
+      const cursor = parsed as CursorRecord;
+      if (cursor.role === "user" || cursor.role === "assistant") {
+        cursorFormat = true;
+        const text =
+          cursor.role === "user"
+            ? extractUserText(record.message.content)
+            : extractAssistantText(record.message.content);
+        if (text) {
+          messages.push({ role: cursor.role, text, timestamp: "" });
+        }
+        continue;
+      }
+    }
+
     // Track the first sessionId we see to detect continuations.
     // Subagent files (path contains /subagents/) always have the parent's
     // sessionId in every record — this is expected, not a continuation.
     const isSubagentFile = filePath.includes("/subagents/");
     if (record.sessionId && !firstRecordSessionId) {
       firstRecordSessionId = record.sessionId;
-      if (!isSubagentFile && firstRecordSessionId !== fileSessionId) {
+      if (firstRecordSessionId !== fileSessionId) {
+        // The link back to the originating session — recorded for BOTH
+        // subagents and continuations.
         parentSessionId = firstRecordSessionId;
+        // Only true continuations replay the parent's records as a prefix to
+        // skip. A subagent's own records all carry the parent's sessionId, so
+        // skipping them would erase the whole transcript.
+        if (!isSubagentFile) continuationParentId = firstRecordSessionId;
       }
     }
 
     // For continuation files, skip prefix records from the parent session
-    if (parentSessionId && record.sessionId === parentSessionId) {
+    if (continuationParentId && record.sessionId === continuationParentId) {
       continue;
     }
 
@@ -276,10 +362,27 @@ export function parseSession(filePath: string): ParsedSession {
     }
   }
 
-  const projectName = projectNameFromPath(projectPath);
-  const userDisplayName = userDisplayNameFromPath(projectPath);
+  let projectName = projectNameFromPath(projectPath);
+  let userDisplayName = userDisplayNameFromPath(projectPath);
   if (codexFormat && assistantDisplayName === "Claude") {
     assistantDisplayName = "Codex";
+  }
+
+  if (cursorFormat) {
+    assistantDisplayName = "Cursor";
+    const dir = cursorProjectFromPath(filePath);
+    projectName = dir;
+    projectPath = dir;
+    userDisplayName = "User";
+
+    // Cursor transcripts have no timestamps; fall back to file times.
+    const stat = statSync(filePath);
+    const birth = stat.birthtime.getTime() ? stat.birthtime : stat.mtime;
+    firstTimestamp = birth.toISOString();
+    lastTimestamp = stat.mtime.toISOString();
+    for (const msg of messages) {
+      msg.timestamp = firstTimestamp;
+    }
   }
 
   return {
@@ -295,6 +398,7 @@ export function parseSession(filePath: string): ParsedSession {
     endedAt: lastTimestamp || null,
     messages,
     messageCount: messages.length,
+    isSubagent: openCodeFormat ? parentSessionId !== null : undefined,
     toMarkdown() {
       const startTime = firstTimestamp ? formatTime(firstTimestamp) : "??:??";
       const endTime = lastTimestamp ? formatTime(lastTimestamp) : "??:??";

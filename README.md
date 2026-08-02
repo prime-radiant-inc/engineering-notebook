@@ -1,6 +1,6 @@
 # Engineering Notebook
 
-A CLI tool that ingests [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://openai.com/index/introducing-codex/) session transcripts, generates LLM-powered daily summaries, and serves a web UI for browsing your engineering journal.
+A CLI tool that ingests [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://openai.com/index/introducing-codex/), and [Cursor](https://cursor.com) session transcripts, generates LLM-powered daily summaries, and serves a web UI for browsing your engineering journal.
 
 Think of it as an automatic engineering diary — it watches your AI coding sessions and distills them into a searchable, browsable narrative of what you built, what problems you hit, and what decisions you made.
 
@@ -8,7 +8,7 @@ Think of it as an automatic engineering diary — it watches your AI coding sess
 
 ## How It Works
 
-1. **Ingest** — Scans directories of Claude Code and Codex JSONL session files, parses out the human-readable conversation (stripping tool calls, thinking blocks, etc.), and stores them in SQLite.
+1. **Ingest** — Scans directories of Claude Code, Codex, and Cursor JSONL session files, parses out the human-readable conversation (stripping tool calls, thinking blocks, etc.), and stores them in SQLite.
 2. **Summarize** — Groups sessions by date and project, then uses Claude to write concise engineering journal entries with headlines, summaries, topics, and open questions.
 3. **Serve** — Runs a web server with a browsable UI: daily journal, project timelines, calendar/Gantt view, session transcripts, full-text search, and an iCal feed.
 
@@ -114,6 +114,57 @@ Config lives at `~/.config/engineering-notebook/config.json`:
 | `summary_instructions` | Custom instructions appended to the LLM summarization prompt                             | `""`                                           |
 | `remote_sources`       | SSH remote sources to sync before ingesting                                              | `[]`                                           |
 | `auto_sync_interval`   | Seconds between auto-syncs when serving                                                  | `60`                                           |
+| `opencode`             | OpenCode session import (opt-in)                                                         | absent                                         |
+| `summary_provider`     | Which model writes summaries and session titles                                          | Claude Haiku                                   |
+
+### OpenCode sessions
+
+OpenCode keeps its sessions in a single SQLite database rather than one file per
+session, so they cannot be scanned like Claude Code and Codex sources. Enabling
+this block exports each session to a staging directory of JSONL files during
+`ingest`, which the normal scanner then picks up:
+
+```json
+{
+  "opencode": {
+    "enabled": true,
+    "staging_dir": "~/.cache/engineering-notebook/opencode",
+    "max_count": 200
+  }
+}
+```
+
+Sessions are enumerated from OpenCode's database (`opencode session list` only
+reports the current directory's project, so it cannot see them all) and their
+transcripts are exported with `opencode export`. A manifest of last-seen update
+times keeps repeat syncs cheap — only changed sessions are re-exported. Omit
+`max_count` to take everything.
+
+Projects are keyed off each session's working directory, so OpenCode and Claude
+Code work in the same repo on the same day lands in one journal entry.
+
+### Choosing a model
+
+Journal summaries and session titles are written by Claude Haiku through the
+Agent SDK by default, which needs no API key. Any OpenAI-compatible endpoint can be used
+instead — including a local llama.cpp server:
+
+```json
+{
+  "summary_provider": {
+    "type": "openai",
+    "base_url": "http://your-host:8001/v1",
+    "model": "gemma-4",
+    "api_key_env": "SPARK_API_KEY",
+    "max_tokens": 4000
+  }
+}
+```
+
+`api_key_env` names the environment variable holding the key — the key itself is
+never stored in the config file. Reasoning models spend completion tokens
+thinking before emitting any content, so keep `max_tokens` generous (it defaults
+to 4000); too small a budget returns an empty response rather than a summary.
 
 ### Remote Sources
 
@@ -141,6 +192,37 @@ webcal://localhost:3000/api/calendar.ics
 ```
 
 This creates calendar events for each journal entry, viewable in Apple Calendar, Google Calendar, Outlook, etc.
+
+## Cursor support
+
+Cursor sessions live under `~/.cursor/projects` (Cursor's `agent-transcripts/`
+layout). This source is **not** scanned by default — add it explicitly:
+
+```sh
+engineering-notebook ingest --source ~/.cursor/projects
+```
+
+Or add `~/.cursor/projects` to the `sources` array in your config.
+
+Cursor's transcript format is leaner than Claude Code's or Codex's, so a few
+caveats apply:
+
+- **Timestamps come from file modification times.** Cursor transcripts contain no
+  per-message timestamps, so a session's start and end are taken from the file's
+  creation and last-modified times, and per-message times are approximate. Copying
+  or restoring transcript files can reset these.
+- **Project names are the raw encoded directory string** (for example
+  `Users-username-GitRepos-my-repo`). Cursor does not record the working directory,
+  and its directory names encode the path lossily — both `/` and `.` collapse to
+  `-` — so the name is shown verbatim rather than guessed at.
+- **Cursor sessions do not auto-merge** with the same repository's Claude Code or
+  Codex sessions, which group by the real working-directory name.
+- **Some Cursor projects appear under an opaque numeric id** (for example
+  `1700000000000`) when Cursor stored no recoverable path.
+
+Planned improvements (not yet implemented): stripping `<attached_files>` and
+terminal-selection wrappers from Cursor messages, and recovering real project
+names via Cursor's `workspaceStorage` mapping.
 
 ## Development
 

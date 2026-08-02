@@ -6,6 +6,73 @@ const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.json
 const codexFixturePath = join(import.meta.dir, "../tests/fixtures/test-codex-session-1.jsonl");
 const subagentFixturePath = join(import.meta.dir, "../tests/fixtures/parent-session-id/subagents/agent-aba4e4e.jsonl");
 const commandFixturePath = join(import.meta.dir, "../tests/fixtures/test-command-messages.jsonl");
+const cursorFixturePath = join(
+  import.meta.dir,
+  "../tests/fixtures/cursor/Users-test-GitRepos-demo-app/agent-transcripts/11111111-1111-4111-8111-111111111111/11111111-1111-4111-8111-111111111111.jsonl"
+);
+const cursorEpochFixturePath = join(
+  import.meta.dir,
+  "../tests/fixtures/cursor/1700000000000/agent-transcripts/22222222-2222-4222-8222-222222222222/22222222-2222-4222-8222-222222222222.jsonl"
+);
+const opencodeFixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-session-1.jsonl");
+const opencodeSubagentFixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-subagent.jsonl");
+
+describe("parseSession (OpenCode format)", () => {
+  test("extracts session metadata from the opencode_meta record", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.sessionId).toBe("ses_abc123");
+    expect(session.projectPath).toBe("/Users/jesse/projects/myapp");
+    expect(session.projectName).toBe("myapp");
+    expect(session.version).toBe("1.18.0");
+    expect(session.assistantDisplayName).toBe("OpenCode");
+  });
+
+  test("parses user and assistant messages", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.messages.length).toBe(3);
+    expect(session.messages[0]!.role).toBe("user");
+    expect(session.messages[0]!.text).toBe("Add retry logic to the fetch helper");
+    expect(session.messages[1]!.role).toBe("assistant");
+  });
+
+  test("uses record timestamps for session bounds", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.startedAt).toBe("2026-07-06T14:22:31.718Z");
+    expect(session.endedAt).toBe("2026-07-06T14:25:10.000Z");
+  });
+
+  test("leaves parentSessionId null for a root session", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.parentSessionId).toBeNull();
+  });
+
+  test("sets parentSessionId for a subagent session", () => {
+    const session = parseSession(opencodeSubagentFixturePath);
+    expect(session.parentSessionId).toBe("ses_abc123");
+  });
+
+  test("flags a session with a parent as a subagent", () => {
+    const session = parseSession(opencodeSubagentFixturePath);
+    expect(session.isSubagent).toBe(true);
+  });
+
+  test("does not flag a root session as a subagent", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.isSubagent).toBe(false);
+  });
+
+  test("leaves isSubagent undefined for Claude Code sessions so path detection still applies", () => {
+    // Claude Code records a parentSessionId for continuations as well as
+    // subagents, so the parser must not claim to know which this is.
+    const session = parseSession(fixturePath);
+    expect(session.isSubagent).toBeUndefined();
+  });
+
+  test("does not misdetect OpenCode sessions as Codex", () => {
+    const session = parseSession(opencodeFixturePath);
+    expect(session.assistantDisplayName).not.toBe("Codex");
+  });
+});
 
 describe("parseSession", () => {
   test("extracts session metadata", () => {
@@ -119,11 +186,65 @@ describe("parseSession", () => {
     expect(session.endedAt).toBeTruthy();
   });
 
+  test("subagent file links to its parent session id", () => {
+    // The parent's sessionId appears in every record; it is the link back to
+    // the originating session (but must NOT trigger continuation record-skipping).
+    const session = parseSession(subagentFixturePath);
+    expect(session.parentSessionId).toBe("b013d855-ab92-4740-9b0a-385abb8a1d8c");
+    expect(session.messages.length).toBe(3);
+  });
+
   test("cleans command-message tags from user messages", () => {
     const session = parseSession(commandFixturePath);
     const userMessages = session.messages.filter((m) => m.role === "user");
     expect(userMessages.length).toBe(2);
     expect(userMessages[0]!.text).toBe("/brainstorm fix the login bug");
     expect(userMessages[1]!.text).toBe("/commit");
+  });
+
+  test("parses Cursor records (role + message, no type)", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.messages.length).toBe(3);
+    expect(session.messageCount).toBe(3);
+    expect(session.messages[0]!.role).toBe("user");
+    expect(session.messages[0]!.text).toBe("Add a health check endpoint");
+    expect(session.messages[1]!.role).toBe("assistant");
+    expect(session.messages[2]!.role).toBe("assistant");
+  });
+
+  test("joins multiple Cursor text blocks in one message", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.messages[1]!.text).toBe("Sure,\nI'll add a /health route.");
+  });
+
+  test("uses filename UUID as Cursor session id", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.sessionId).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  test("uses full encoded directory as Cursor project name", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.projectName).toBe("Users-test-GitRepos-demo-app");
+    expect(session.assistantDisplayName).toBe("Cursor");
+  });
+
+  test("uses raw epoch id as Cursor project name for opaque dirs", () => {
+    const session = parseSession(cursorEpochFixturePath);
+    expect(session.projectName).toBe("1700000000000");
+  });
+
+  test("derives Cursor timestamps from file times", () => {
+    const session = parseSession(cursorFixturePath);
+    expect(session.startedAt).toBeTruthy();
+    expect(session.endedAt).toBeTruthy();
+    expect(session.startedAt <= session.endedAt!).toBe(true);
+  });
+
+  test("uses Cursor label in markdown", () => {
+    const session = parseSession(cursorFixturePath);
+    const md = session.toMarkdown();
+    expect(md).toContain("# Session: Users-test-GitRepos-demo-app");
+    expect(md).toContain("**Cursor (");
+    expect(md).toContain("Done. Added GET /health returning 200.");
   });
 });

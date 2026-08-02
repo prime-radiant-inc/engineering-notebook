@@ -13,9 +13,10 @@
     "engineering-notebook": "src/index.ts"
   },
   "scripts": {
-    "test": "bun test",
+    "test": "bun test ./src",
+    "test:web": "cd web && bunx vitest run",
     "typecheck": "bun --bun node_modules/.bin/tsc --noEmit",
-    "check": "bun test && bun run typecheck",
+    "check": "bun test ./src && bun run typecheck",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
@@ -28,6 +29,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.50",
     "@anthropic-ai/sdk": "^0.78.0",
     "@hono/node-server": "^1.19.9",
+    "classic-level": "^3.0.0",
     "hono": "^4.12.1"
   }
 }

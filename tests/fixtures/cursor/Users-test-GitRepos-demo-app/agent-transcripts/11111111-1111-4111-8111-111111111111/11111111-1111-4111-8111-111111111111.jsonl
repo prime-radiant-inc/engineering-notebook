@@ -1,0 +1,3 @@
+{"role":"user","message":{"content":[{"type":"text","text":"Add a health check endpoint"}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Sure,"},{"type":"text","text":"I'll add a /health route."}]}}
+{"role":"assistant","message":{"content":[{"type":"text","text":"Done. Added GET /health returning 200."}]}}

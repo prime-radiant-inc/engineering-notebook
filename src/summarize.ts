@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
+import { complete, providerModel, DEFAULT_CLAUDE_MODEL, type SummaryProvider } from "./llm";
 
-const SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
+const SUMMARIZE_MODEL = DEFAULT_CLAUDE_MODEL;
 
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) return "";
@@ -337,7 +338,8 @@ export function parseSummaryResponse(response: string): SummaryResult {
 export function upsertJournalEntry(
   db: Database,
   group: SessionGroup,
-  result: SummaryResult
+  result: SummaryResult,
+  modelUsed: string = SUMMARIZE_MODEL
 ): void {
   if (result.skipped) {
     db.prepare(
@@ -354,7 +356,7 @@ export function upsertJournalEntry(
       group.projectId,
       JSON.stringify(group.sessionIds),
       result.skipReason || "No reason given",
-      SUMMARIZE_MODEL
+      modelUsed
     );
     return;
   }
@@ -380,7 +382,7 @@ export function upsertJournalEntry(
     result.summary,
     JSON.stringify(result.topics),
     JSON.stringify(result.openQuestions),
-    SUMMARIZE_MODEL
+    modelUsed
   );
 }
 
@@ -388,47 +390,30 @@ export function upsertJournalEntry(
 export async function summarizeGroup(
   group: SessionGroup,
   db: Database,
-  summaryInstructions?: string
+  summaryInstructions?: string,
+  provider?: SummaryProvider
 ): Promise<{ skipped: boolean; skipReason?: string }> {
-  const { query } = await import("@anthropic-ai/claude-agent-sdk");
   const prompt = buildSummaryPrompt(group, summaryInstructions);
 
-  let responseText = "";
-
-  const env = { ...process.env };
-  delete env.CLAUDECODE;
-
-  const result = query({
-    prompt,
-    options: {
-      model: SUMMARIZE_MODEL,
-      maxTurns: 1,
-      tools: [],
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
-      persistSession: false,
-      env,
-    },
-  });
-
-  for await (const message of result) {
-    if (message.type === "assistant") {
-      const content = message.message.content;
-      for (const block of content) {
-        if ("text" in block && typeof block.text === "string") {
-          responseText += block.text;
-        }
-      }
-    }
-  }
-
-  if (!responseText.trim()) {
-    throw new Error("Empty response from LLM");
-  }
+  const responseText = await complete(prompt, provider);
 
   const parsed = parseSummaryResponse(responseText);
 
-  upsertJournalEntry(db, group, parsed);
+  upsertJournalEntry(db, group, parsed, providerModel(provider));
+
+  // Give each summarized session a Desktop-style title if it doesn't already
+  // have one (Desktop/user titles and existing generated ones are left alone).
+  const { titleSession } = await import("./titles");
+  for (const sid of group.sessionIds) {
+    try {
+      const row = db.query("SELECT title, COALESCE(is_subagent, 0) AS sub FROM sessions WHERE id = ?").get(sid) as
+        | { title: string | null; sub: number } | null;
+      if (row && !row.title && !row.sub) await titleSession(db, sid, provider);
+    } catch {
+      // title generation is best-effort; never fail a summary over it
+    }
+  }
+
   return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
 }
 
@@ -439,7 +424,8 @@ export async function summarizeAll(
   filterProject?: string,
   onProgress?: (done: number, total: number, group: SessionGroup) => void,
   dayStartHour: number = 5,
-  summaryInstructions?: string
+  summaryInstructions?: string,
+  provider?: SummaryProvider
 ): Promise<{ summarized: number; skipped: number; skipReasons: string[]; errors: string[] }> {
   const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, dayStartHour);
   let summarized = 0;
@@ -447,7 +433,18 @@ export async function summarizeAll(
   const skipReasons: string[] = [];
   const errors: string[] = [];
 
-  if (groups.length > 0) {
+  // Apply any Claude Desktop titles up front so summarization only LLM-generates
+  // titles for sessions that genuinely lack one.
+  try {
+    const { applyDesktopTitles } = await import("./titles");
+    applyDesktopTitles(db);
+  } catch {
+    // no Desktop data / reader unavailable — fine, we'll generate as needed
+  }
+
+  // Only Claude needs a local login; an OpenAI-compatible endpoint authenticates
+  // with its own key, so don't block on Claude auth there.
+  if (groups.length > 0 && provider?.type !== "openai") {
     const authIssue = await getClaudeAuthIssue();
     if (authIssue) {
       errors.push(authIssue);
@@ -458,7 +455,7 @@ export async function summarizeAll(
   for (const group of groups) {
     try {
       onProgress?.(summarized + skipped, groups.length, group);
-      const result = await summarizeGroup(group, db, summaryInstructions);
+      const result = await summarizeGroup(group, db, summaryInstructions, provider);
       if (result.skipped) {
         skipped++;
         if (result.skipReason) skipReasons.push(result.skipReason);
