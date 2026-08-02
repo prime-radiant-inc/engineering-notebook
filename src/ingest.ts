@@ -60,10 +60,13 @@ export function scanSources(
 export function ingestSessions(
   files: string[],
   db: Database,
-  force = false
-): { ingested: number; skipped: number; errors: string[] } {
-  let ingested = 0;
-  let skipped = 0;
+  force = false,
+  onProgress?: (done: number, total: number) => void
+): {
+  ingested: number; skipped: number; errors: string[];
+  alreadyIngested: number; empty: number; duplicateId: number; totalMessages: number;
+} {
+  let ingested = 0, alreadyIngested = 0, empty = 0, duplicateId = 0, totalMessages = 0;
   const errors: string[] = [];
 
   const checkStmt = db.query("SELECT id FROM sessions WHERE source_path = ?");
@@ -84,30 +87,27 @@ export function ingestSessions(
   const deleteConvo = db.prepare(`DELETE FROM conversations WHERE session_id = ?`);
   const deleteSession = db.prepare(`DELETE FROM sessions WHERE id = ?`);
 
-  for (const file of files) {
-    if (!force) {
-      const existing = checkStmt.get(file);
-      if (existing) {
-        skipped++;
-        continue;
-      }
+  for (let i = 0; i < files.length; i++) {
+    onProgress?.(i, files.length);
+    const file = files[i]!;
+
+    if (!force && checkStmt.get(file)) {
+      alreadyIngested++;
+      continue;
     }
 
     try {
       const session = parseSession(file);
 
       if (session.messageCount === 0) {
-        skipped++;
+        empty++;
         continue;
       }
 
       // Skip if session ID already exists (e.g., same session in multiple project dirs)
-      if (!force) {
-        const existingById = checkSessionId.get(session.sessionId);
-        if (existingById) {
-          skipped++;
-          continue;
-        }
+      if (!force && checkSessionId.get(session.sessionId)) {
+        duplicateId++;
+        continue;
       }
 
       const projectId = session.projectName;
@@ -122,7 +122,10 @@ export function ingestSessions(
           session.projectPath,
           session.projectName
         );
-        const isSubagent = file.includes("/subagents/") ? 1 : 0;
+        // Formats that state it outright win; otherwise fall back to Claude
+        // Code's on-disk convention of nesting subagents under /subagents/.
+        const isSubagent =
+          (session.isSubagent ?? file.includes("/subagents/")) ? 1 : 0;
         insertSession.run(
           session.sessionId,
           session.parentSessionId,
@@ -140,10 +143,12 @@ export function ingestSessions(
       })();
 
       ingested++;
+      totalMessages += session.messageCount;
     } catch (err) {
       errors.push(`${file}: ${err}`);
     }
   }
+  onProgress?.(files.length, files.length);
 
   // Update project aggregate fields
   db.exec(`
@@ -153,5 +158,8 @@ export function ingestSessions(
       session_count = (SELECT COUNT(*) FROM sessions WHERE sessions.project_id = projects.id)
   `);
 
-  return { ingested, skipped, errors };
+  return {
+    ingested, skipped: alreadyIngested + empty + duplicateId, errors,
+    alreadyIngested, empty, duplicateId, totalMessages,
+  };
 }

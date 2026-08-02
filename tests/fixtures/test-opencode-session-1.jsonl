@@ -1,0 +1,4 @@
+{"type":"opencode_meta","timestamp":"2026-07-06T14:22:31.718Z","payload":{"id":"ses_abc123","cwd":"/Users/jesse/projects/myapp","title":"Build the thing","version":"1.18.0","parent_id":null,"model":"spark/qwen3-coder"}}
+{"type":"user","timestamp":"2026-07-06T14:22:32.352Z","message":{"role":"user","content":"Add retry logic to the fetch helper"}}
+{"type":"assistant","timestamp":"2026-07-06T14:22:33.000Z","message":{"role":"assistant","content":"Added a three-attempt retry with backoff."}}
+{"type":"user","timestamp":"2026-07-06T14:25:10.000Z","message":{"role":"user","content":"Ship it"}}

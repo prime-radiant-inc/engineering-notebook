@@ -147,6 +147,30 @@ describe("ingestSessions", () => {
     expect(session?.is_subagent).toBe(0);
   });
 
+  test("marks an OpenCode session with a parent as is_subagent=1 despite a flat path", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-subagent.jsonl");
+    const stagingDir = join(tempDir, "opencode-staging");
+    mkdirSync(stagingDir, { recursive: true });
+    const sessionFile = join(stagingDir, "ses_child9.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const session = db.query("SELECT is_subagent FROM sessions").get() as { is_subagent: number } | null;
+    expect(session?.is_subagent).toBe(1);
+  });
+
+  test("marks a root OpenCode session as is_subagent=0", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-opencode-session-1.jsonl");
+    const stagingDir = join(tempDir, "opencode-staging");
+    mkdirSync(stagingDir, { recursive: true });
+    const sessionFile = join(stagingDir, "ses_abc123.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const session = db.query("SELECT is_subagent FROM sessions").get() as { is_subagent: number } | null;
+    expect(session?.is_subagent).toBe(0);
+  });
+
   test("ingests a Codex session file into the database", () => {
     const fixturePath = join(import.meta.dir, "../tests/fixtures/test-codex-session-1.jsonl");
     const codexDir = join(tempDir, "2026", "02", "24");
@@ -169,5 +193,35 @@ describe("ingestSessions", () => {
     expect(session?.project_path).toBe("/Users/peteror/Code/engineering-notebook");
     expect(session?.version).toBe("0.99.0-alpha.23");
     expect(session?.message_count).toBe(2);
+  });
+
+  test("ingests a Cursor session file into the database", () => {
+    const uuid = "11111111-1111-4111-8111-111111111111";
+    const fixturePath = join(
+      import.meta.dir,
+      `../tests/fixtures/cursor/Users-test-GitRepos-demo-app/agent-transcripts/${uuid}/${uuid}.jsonl`
+    );
+    const dir = join(tempDir, "Users-test-GitRepos-demo-app", "agent-transcripts", uuid);
+    mkdirSync(dir, { recursive: true });
+    const sessionFile = join(dir, `${uuid}.jsonl`);
+    copyFileSync(fixturePath, sessionFile);
+
+    const result = ingestSessions([sessionFile], db);
+    expect(result.ingested).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.errors.length).toBe(0);
+
+    const session = db
+      .query("SELECT id, project_id, message_count, is_subagent FROM sessions")
+      .get() as {
+      id: string;
+      project_id: string;
+      message_count: number;
+      is_subagent: number;
+    } | null;
+    expect(session?.id).toBe(uuid);
+    expect(session?.project_id).toBe("Users-test-GitRepos-demo-app");
+    expect(session?.message_count).toBe(3);
+    expect(session?.is_subagent).toBe(0);
   });
 });
