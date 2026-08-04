@@ -31,6 +31,16 @@ export type Config = {
   opencode?: OpenCodeConfig;
   /** Which model writes journal entries and session titles. Claude by default. */
   summary_provider?: SummaryProvider;
+  /** First day of the reporting week: 0 = Sunday, 1 = Monday. Defaults to 1. */
+  week_start_day?: number;
+  /** Where weekly report markdown is exported. */
+  reports_dir?: string;
+  /** URL of the report prompt template. Unset means use the shipped default. */
+  report_template_url?: string;
+  /** Where the last successfully fetched template is cached. */
+  report_template_cache?: string;
+  /** Model for weekly reports. Falls back to summary_provider when unset. */
+  report_provider?: SummaryProvider;
 };
 
 export function defaultConfig(): Config {
