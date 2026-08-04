@@ -27,6 +27,6 @@ cd "$REPO" || { echo "FAIL: $REPO not found"; exit 1; }
 
 # No --week: the CLI defaults to the last completed week.
 bun src/index.ts report "$@"
-status=$?
-echo "=== done (exit $status) ==="
-exit $status
+rc=$?
+echo "=== done (exit $rc) ==="
+exit $rc
