@@ -131,7 +131,6 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   app.get("/reports", async (c) => {
     const { weekRangeForLabel, lastCompletedWeek } = await import("../week");
     const { renderReports } = await import("./views/reports");
-    const { loadConfig } = await import("../config");
     const startDay = loadConfig().week_start_day ?? 1;
     const week = c.req.query("week");
     const range = week
@@ -149,7 +148,7 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
     const { weekRangeForLabel } = await import("../week");
     const { resolveTemplate } = await import("../report-template");
     const { generateReport, exportMarkdown } = await import("../reports");
-    const { loadConfig, expandPath } = await import("../config");
+    const { expandPath } = await import("../config");
     const { startJob, renderJobStatus } = await import("./views/reports");
 
     const config = loadConfig();
