@@ -613,6 +613,9 @@ git commit -m "feat(reports): weekly_reports table and report configuration"
   - `buildVars(range: WeekRange, entries: ReportEntry[]): Record<string, string>`
   - `parseSections(markdown: string): Record<string, string>`
   - `storeReport(db, args: { range: WeekRange; markdown: string; entryIds: number[]; templateSource: string; model: string }): number` — returns the new version
+  - `buildPrompt(db, range: WeekRange, template: ResolvedTemplate): { prompt: string; entries: ReportEntry[] }`
+  - `type StoredReport = { markdown: string; version: number; generated_at: string; template_source: string }`
+  - `latestReport(db, weekLabel: string): StoredReport | null`
   - `generateReport(db, opts: { range: WeekRange; template: ResolvedTemplate; provider?: SummaryProvider; completeImpl?: typeof complete }): Promise<{ markdown: string; version: number }>`
 
 - [ ] **Step 1: Write the failing test**
@@ -900,10 +903,31 @@ export function storeReport(
 
   try {
     return insert();
-  } catch {
-    // A concurrent generation took our version number. Retry once.
+  } catch (err) {
+    // A concurrent generation may have taken our version number. Retry once for
+    // that specific case only; anything else is a real failure and must surface.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/UNIQUE constraint failed/i.test(msg)) throw err;
     return insert();
   }
+}
+
+/**
+ * Gather the week's entries and render them into the template.
+ *
+ * Shared by generateReport and the CLI's --stdout preview so the prompt is
+ * built in exactly one place. Throws when the week has no entries.
+ */
+export function buildPrompt(
+  db: Database,
+  range: WeekRange,
+  template: ResolvedTemplate
+): { prompt: string; entries: ReportEntry[] } {
+  const entries = gatherEntries(db, range);
+  if (entries.length === 0) {
+    throw new Error(`No entries for ${range.label} (${range.start} to ${range.end})`);
+  }
+  return { prompt: renderTemplate(template.text, buildVars(range, entries)), entries };
 }
 
 export async function generateReport(
@@ -915,12 +939,7 @@ export async function generateReport(
     completeImpl?: typeof complete;
   }
 ): Promise<{ markdown: string; version: number }> {
-  const entries = gatherEntries(db, opts.range);
-  if (entries.length === 0) {
-    throw new Error(`No entries for ${opts.range.label} (${opts.range.start} to ${opts.range.end})`);
-  }
-
-  const prompt = renderTemplate(opts.template.text, buildVars(opts.range, entries));
+  const { prompt, entries } = buildPrompt(db, opts.range, opts.template);
   const run = opts.completeImpl ?? complete;
   const markdown = await run(prompt, opts.provider);
 
@@ -935,17 +954,22 @@ export async function generateReport(
   return { markdown, version };
 }
 
-/** Latest stored report for a week, or null. */
-export function latestReport(
-  db: Database,
-  weekLabel: string
-): { markdown: string; version: number; generated_at: string; template_source: string } | null {
-  return db
+export type StoredReport = {
+  markdown: string;
+  version: number;
+  generated_at: string;
+  template_source: string;
+};
+
+/** Latest stored report for a week, or null when none exists. */
+export function latestReport(db: Database, weekLabel: string): StoredReport | null {
+  const row = db
     .query(
       `SELECT markdown, version, generated_at, template_source
        FROM weekly_reports WHERE week_label = ? ORDER BY version DESC LIMIT 1`
     )
-    .get(weekLabel) as any;
+    .get(weekLabel) as StoredReport | null;
+  return row ?? null;
 }
 ```
 
@@ -1075,17 +1099,10 @@ In `src/index.ts`, add a new case after the `title` case:
       }
 
       if (toStdout) {
-        const { gatherEntries, buildVars } = await import("./reports");
-        const { renderTemplate } = await import("./report-template");
-        const entries = gatherEntries(db, range);
-        if (entries.length === 0) {
-          console.log(`No entries for ${range.label} — nothing to report.`);
-          closeDb();
-          break;
-        }
+        const { buildPrompt } = await import("./reports");
         const { complete } = await import("./llm");
-        const markdown = await complete(renderTemplate(template.text, buildVars(range, entries)), provider);
-        console.log(markdown);
+        const { prompt } = buildPrompt(db, range, template);
+        console.log(await complete(prompt, provider));
         closeDb();
         break;
       }
