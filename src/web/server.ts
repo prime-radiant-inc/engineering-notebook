@@ -127,6 +127,55 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
     return c.html(renderLayout("Calendar — Engineering Notebook", { fullBody, activeTab: "calendar" }));
   });
 
+  // Reports
+  app.get("/reports", async (c) => {
+    const { weekRangeForLabel, lastCompletedWeek } = await import("../week");
+    const { renderReports } = await import("./views/reports");
+    const { loadConfig } = await import("../config");
+    const startDay = loadConfig().week_start_day ?? 1;
+    const week = c.req.query("week");
+    const range = week
+      ? weekRangeForLabel(week, startDay)
+      : lastCompletedWeek(new Date().toISOString().slice(0, 10), startDay);
+    return c.html(renderLayout(`Report ${range.label}`, {
+      activeTab: "reports",
+      fullBody: renderReports(db, range.label),
+    }));
+  });
+
+  app.post("/reports/generate", async (c) => {
+    const form = await c.req.parseBody();
+    const week = String(form.week ?? "");
+    const { weekRangeForLabel } = await import("../week");
+    const { resolveTemplate } = await import("../report-template");
+    const { generateReport, exportMarkdown } = await import("../reports");
+    const { loadConfig, expandPath } = await import("../config");
+    const { startJob, renderJobStatus } = await import("./views/reports");
+
+    const config = loadConfig();
+    const range = weekRangeForLabel(week, config.week_start_day ?? 1);
+
+    const id = startJob(async () => {
+      const template = await resolveTemplate({
+        url: config.report_template_url,
+        cachePath: expandPath(config.report_template_cache ?? "~/.config/engineering-notebook/report-template.cache.md"),
+      });
+      const result = await generateReport(db, {
+        range,
+        template,
+        provider: config.report_provider ?? config.summary_provider,
+      });
+      exportMarkdown(expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports"), range.label, result.markdown);
+    });
+
+    return c.html(renderJobStatus(id));
+  });
+
+  app.get("/reports/status/:id", async (c) => {
+    const { renderJobStatus } = await import("./views/reports");
+    return c.html(renderJobStatus(c.req.param("id")));
+  });
+
   // iCal feed
   app.get("/api/calendar.ics", (c) => {
     const config = loadConfig();
