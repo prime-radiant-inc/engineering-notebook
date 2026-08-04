@@ -82,6 +82,29 @@ whatever is there. That is what you want for the current day: a day gets
 summarized while you are still working, and re-running `--date today` folds in
 everything since. Pair it with `--project` to regenerate a single project's entry.
 
+### `engineering-notebook report`
+
+Aggregate a week's journal entries into a status report.
+
+```sh
+engineering-notebook report                    # last completed week
+engineering-notebook report --week 2026-W31    # a specific week
+engineering-notebook report --stdout           # print without storing or exporting
+```
+
+Reports are stored with version history and exported to `reports_dir` as
+`<week>.md`. Re-running creates a new version rather than overwriting, so the
+record of what you already sent is preserved.
+
+The prompt is a markdown template you control. Point `report_template_url` at a
+file and the whole team generates reports in the same shape. Placeholders:
+`{{week_label}}`, `{{week_start}}`, `{{week_end}}`, `{{entries}}`,
+`{{open_questions}}`, `{{project_list}}`. Unknown placeholders are left as-is.
+
+Every successful fetch is cached. If the URL is unreachable the cached copy is
+used; if there is no cache, generation fails rather than silently falling back
+to a differently-shaped default.
+
 ### `engineering-notebook serve`
 
 Start the web server.
@@ -110,18 +133,23 @@ Config lives at `~/.config/engineering-notebook/config.json`:
 }
 ```
 
-| Field                  | Description                                                                              | Default                                        |
-| ---------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `sources`              | Directories to scan for session files                                                    | `["~/.claude/projects", "~/.codex/sessions"]`  |
-| `exclude`              | Glob patterns for directories to skip                                                    | `["-private-tmp*", "*-skill-test-*"]`          |
-| `db_path`              | SQLite database location                                                                 | `~/.config/engineering-notebook/notebook.db`   |
-| `port`                 | Web server port                                                                          | `3000`                                         |
-| `day_start_hour`       | Hour (0-23) when a "day" starts (for grouping late-night sessions with the previous day) | `5`                                            |
-| `summary_instructions` | Custom instructions appended to the LLM summarization prompt                             | `""`                                           |
-| `remote_sources`       | SSH remote sources to sync before ingesting                                              | `[]`                                           |
-| `auto_sync_interval`   | Seconds between auto-syncs when serving                                                  | `60`                                           |
-| `opencode`             | OpenCode session import (opt-in)                                                         | absent                                         |
-| `summary_provider`     | Which model writes summaries and titles                                                  | Claude Haiku                                   |
+| Field                    | Description                                                                              | Default                                        |
+| ------------------------ | ---------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `sources`                | Directories to scan for session files                                                    | `["~/.claude/projects", "~/.codex/sessions"]`  |
+| `exclude`                | Glob patterns for directories to skip                                                    | `["-private-tmp*", "*-skill-test-*"]`          |
+| `db_path`                | SQLite database location                                                                 | `~/.config/engineering-notebook/notebook.db`   |
+| `port`                   | Web server port                                                                          | `3000`                                         |
+| `day_start_hour`         | Hour (0-23) when a "day" starts (for grouping late-night sessions with the previous day) | `5`                                            |
+| `summary_instructions`   | Custom instructions appended to the LLM summarization prompt                             | `""`                                           |
+| `remote_sources`         | SSH remote sources to sync before ingesting                                              | `[]`                                           |
+| `auto_sync_interval`     | Seconds between auto-syncs when serving                                                  | `60`                                           |
+| `opencode`               | OpenCode session import (opt-in)                                                         | absent                                         |
+| `summary_provider`       | Which model writes summaries and titles                                                  | Claude Haiku                                   |
+| `week_start_day`         | First day of the reporting week (0 = Sunday, 1 = Monday)                                 | `1`                                            |
+| `reports_dir`            | Where weekly report markdown is exported                                                 | `~/.config/engineering-notebook/reports`       |
+| `report_template_url`    | URL of the report prompt template (unset uses shipped default)                           | absent                                         |
+| `report_template_cache`  | Where the last successfully fetched template is cached                                   | absent                                         |
+| `report_provider`        | Model for weekly reports (falls back to summary_provider when unset)                    | absent                                         |
 
 ### OpenCode sessions
 
