@@ -9,6 +9,8 @@
  */
 
 import { Database } from "bun:sqlite";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { complete, providerModel, type SummaryProvider } from "./llm";
 import type { WeekRange } from "./week";
 import type { ResolvedTemplate } from "./report-template";
@@ -186,4 +188,12 @@ export function latestReport(db: Database, weekLabel: string): StoredReport | nu
     )
     .get(weekLabel) as StoredReport | null;
   return row ?? null;
+}
+
+/** Write the week's markdown to `<dir>/<week_label>.md`, returning the path. */
+export function exportMarkdown(dir: string, weekLabel: string, markdown: string): string {
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${weekLabel}.md`);
+  writeFileSync(path, markdown);
+  return path;
 }

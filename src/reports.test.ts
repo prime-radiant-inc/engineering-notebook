@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { gatherEntries, buildVars, parseSections, storeReport, generateReport } from "./reports";
+import { gatherEntries, buildVars, parseSections, storeReport, generateReport, exportMarkdown } from "./reports";
 import { weekRangeForLabel } from "./week";
 import { initDb, closeDb } from "./db";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -143,5 +143,32 @@ describe("generateReport", () => {
     ).rejects.toThrow(/connection refused/);
     const rows = db.query("SELECT COUNT(*) AS n FROM weekly_reports").get() as { n: number };
     expect(rows.n).toBe(0);
+  });
+});
+
+describe("exportMarkdown", () => {
+  test("writes one file per week and overwrites on regeneration", () => {
+    const dir = mkdtempSync(join(tmpdir(), "en-export-"));
+    try {
+      const p1 = exportMarkdown(dir, "2026-W31", "first");
+      expect(p1).toBe(join(dir, "2026-W31.md"));
+      expect(readFileSync(p1, "utf-8")).toBe("first");
+
+      const p2 = exportMarkdown(dir, "2026-W31", "second");
+      expect(p2).toBe(p1);
+      expect(readFileSync(p2, "utf-8")).toBe("second");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("creates the directory when missing", () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "en-export-")), "nested", "reports");
+    try {
+      const p = exportMarkdown(dir, "2026-W31", "x");
+      expect(existsSync(p)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

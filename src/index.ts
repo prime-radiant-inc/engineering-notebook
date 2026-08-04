@@ -161,10 +161,69 @@ switch (command) {
     closeDb();
     break;
   }
+  case "report": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+
+    const weekIdx = process.argv.indexOf("--week");
+    const weekArg = weekIdx !== -1 ? process.argv[weekIdx + 1] : undefined;
+    const toStdout = process.argv.includes("--stdout");
+
+    const { weekRangeForLabel, lastCompletedWeek } = await import("./week");
+    const startDay = config.week_start_day ?? 1;
+    const today = new Date().toISOString().slice(0, 10);
+    const range = weekArg
+      ? weekRangeForLabel(weekArg, startDay)
+      : lastCompletedWeek(today, startDay);
+
+    const { resolveTemplate } = await import("./report-template");
+    const { generateReport, exportMarkdown } = await import("./reports");
+    const { providerModel } = await import("./llm");
+
+    const provider = config.report_provider ?? config.summary_provider;
+    console.log(`Generating ${range.label} (${range.start} to ${range.end}) with ${providerModel(provider)}...`);
+
+    try {
+      const template = await resolveTemplate({
+        url: config.report_template_url,
+        cachePath: expandPath(
+          config.report_template_cache ?? "~/.config/engineering-notebook/report-template.cache.md"
+        ),
+      });
+      if (template.source === "cache") {
+        console.log("  ! template URL unreachable — using the last cached copy");
+      }
+
+      if (toStdout) {
+        const { buildPrompt } = await import("./reports");
+        const { complete } = await import("./llm");
+        const { prompt } = buildPrompt(db, range, template);
+        console.log(await complete(prompt, provider));
+        closeDb();
+        break;
+      }
+
+      const result = await generateReport(db, { range, template, provider });
+      const dir = expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports");
+      const path = exportMarkdown(dir, range.label, result.markdown);
+      console.log(`Wrote ${range.label} v${result.version} to ${path}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/^No entries for/.test(msg)) {
+        console.log(`${msg} — nothing to report.`);
+      } else {
+        console.error(`Report failed: ${msg}`);
+        process.exitCode = 1;
+      }
+    }
+
+    closeDb();
+    break;
+  }
   case "config":
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|serve|title|config>");
+    console.log("Usage: notebook <ingest|summarize|report|serve|config>");
     process.exit(1);
 }
