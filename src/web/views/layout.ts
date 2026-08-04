@@ -260,6 +260,31 @@ export function renderLayout(title: string, content: LayoutContent): string {
       font-family: var(--font-serif);
       margin-bottom: 6px;
     }
+    .report-meta {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 16px;
+    }
+    .report-markdown {
+      max-width: 780px;
+      line-height: 1.6;
+    }
+    .report-markdown h2 {
+      font-size: 16px;
+      margin: 24px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .report-markdown h3 { font-size: 14px; margin: 16px 0 6px; }
+    .report-markdown p { margin: 0 0 12px; }
+    .report-markdown ul { margin: 0 0 12px; padding-left: 22px; }
+    .report-markdown li { margin-bottom: 4px; }
+    .report-markdown code {
+      background: #f4f4f4;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 12px;
+    }
     .entry-summary {
       font-size: 13px;
       color: var(--text-muted);

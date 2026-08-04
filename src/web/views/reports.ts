@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { escapeHtml } from "./helpers";
 import { latestReport, NoEntriesError } from "../../reports";
+import { renderMarkdown } from "./markdown";
 
 export type JobState = "pending" | "done" | "empty" | "error";
 export type Job = { state: JobState; error?: string; week?: string };
@@ -42,7 +43,7 @@ export function renderReports(db: Database, weekLabel: string): string {
 
   const body = report
     ? `<div class="report-meta">v${report.version} · generated ${escapeHtml(report.generated_at)} · template: ${escapeHtml(report.template_source)}</div>
-       <pre class="report-markdown">${escapeHtml(report.markdown)}</pre>`
+       <article class="report-markdown">${renderMarkdown(report.markdown)}</article>`
     : `<p class="empty">No report for ${escapeHtml(weekLabel)} yet.</p>`;
 
   return `
