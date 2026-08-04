@@ -16,6 +16,14 @@ import type { WeekRange } from "./week";
 import type { ResolvedTemplate } from "./report-template";
 import { renderTemplate } from "./report-template";
 
+/** Signals "no entries for this week" distinctly from any other failure. */
+export class NoEntriesError extends Error {
+  constructor(public readonly range: WeekRange) {
+    super(`No entries for ${range.label} (${range.start} to ${range.end})`);
+    this.name = "NoEntriesError";
+  }
+}
+
 export type ReportEntry = {
   id: number;
   date: string;
@@ -143,7 +151,7 @@ export function buildPrompt(
 ): { prompt: string; entries: ReportEntry[] } {
   const entries = gatherEntries(db, range);
   if (entries.length === 0) {
-    throw new Error(`No entries for ${range.label} (${range.start} to ${range.end})`);
+    throw new NoEntriesError(range);
   }
   return { prompt: renderTemplate(template.text, buildVars(range, entries)), entries };
 }

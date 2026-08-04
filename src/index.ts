@@ -169,21 +169,22 @@ switch (command) {
     const weekArg = weekIdx !== -1 ? process.argv[weekIdx + 1] : undefined;
     const toStdout = process.argv.includes("--stdout");
 
-    const { weekRangeForLabel, lastCompletedWeek } = await import("./week");
-    const startDay = config.week_start_day ?? 1;
-    const today = new Date().toISOString().slice(0, 10);
-    const range = weekArg
-      ? weekRangeForLabel(weekArg, startDay)
-      : lastCompletedWeek(today, startDay);
-
     const { resolveTemplate } = await import("./report-template");
-    const { generateReport, exportMarkdown } = await import("./reports");
-    const { providerModel } = await import("./llm");
+    const { generateReport, exportMarkdown, buildPrompt, NoEntriesError } = await import("./reports");
+    const { providerModel, complete } = await import("./llm");
 
     const provider = config.report_provider ?? config.summary_provider;
-    console.log(`Generating ${range.label} (${range.start} to ${range.end}) with ${providerModel(provider)}...`);
 
     try {
+      const { weekRangeForLabel, lastCompletedWeek } = await import("./week");
+      const startDay = config.week_start_day ?? 1;
+      const today = new Date().toISOString().slice(0, 10);
+      const range = weekArg
+        ? weekRangeForLabel(weekArg, startDay)
+        : lastCompletedWeek(today, startDay);
+
+      console.log(`Generating ${range.label} (${range.start} to ${range.end}) with ${providerModel(provider)}...`);
+
       const template = await resolveTemplate({
         url: config.report_template_url,
         cachePath: expandPath(
@@ -195,8 +196,6 @@ switch (command) {
       }
 
       if (toStdout) {
-        const { buildPrompt } = await import("./reports");
-        const { complete } = await import("./llm");
         const { prompt } = buildPrompt(db, range, template);
         console.log(await complete(prompt, provider));
         closeDb();
@@ -204,14 +203,22 @@ switch (command) {
       }
 
       const result = await generateReport(db, { range, template, provider });
-      const dir = expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports");
-      const path = exportMarkdown(dir, range.label, result.markdown);
-      console.log(`Wrote ${range.label} v${result.version} to ${path}`);
+
+      // A write failure here does not undo the already-committed report — warn,
+      // do not fail the command.
+      try {
+        const dir = expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports");
+        const path = exportMarkdown(dir, range.label, result.markdown);
+        console.log(`Wrote ${range.label} v${result.version} to ${path}`);
+      } catch (exportErr) {
+        const msg = exportErr instanceof Error ? exportErr.message : String(exportErr);
+        console.warn(`Warning: report v${result.version} was stored but could not be exported to disk: ${msg}`);
+      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/^No entries for/.test(msg)) {
-        console.log(`${msg} — nothing to report.`);
+      if (err instanceof NoEntriesError) {
+        console.log(`${err.message} — nothing to report.`);
       } else {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error(`Report failed: ${msg}`);
         process.exitCode = 1;
       }
@@ -224,6 +231,6 @@ switch (command) {
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|report|serve|config>");
+    console.log("Usage: notebook <ingest|summarize|report|serve|title|config>");
     process.exit(1);
 }

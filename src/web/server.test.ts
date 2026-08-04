@@ -282,6 +282,50 @@ describe("server", () => {
     });
   });
 
+  describe("reports routes", () => {
+    test("GET /reports returns 200 and renders the page", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/reports");
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Weekly Report");
+    });
+
+    test("GET /reports?week=2026-W31 returns 200 for a valid label", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/reports?week=2026-W31");
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("2026-W31");
+    });
+
+    test("GET /reports?week=not-a-week does not 500 — friendly 400 instead", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/reports?week=not-a-week");
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      expect(text).toMatch(/YYYY-Www/);
+    });
+
+    test("POST /reports/generate with a malformed week does not 500 — friendly 400 instead", async () => {
+      const app = createApp(db, syncManager);
+      const form = new FormData();
+      form.append("week", "not-a-week");
+      const res = await app.request("/reports/generate", { method: "POST", body: form });
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      expect(text).toMatch(/YYYY-Www/);
+    });
+
+    test("GET /reports/status/:id for an unknown id returns 200 with an Unknown job message", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/reports/status/no-such-job-id");
+      expect(res.status).toBe(200);
+      const html = await res.text();
+      expect(html).toContain("Unknown job");
+    });
+  });
+
   describe("session toggle route", () => {
     function seedWithFile(id: string, sourcePath: string) {
       db.query("INSERT OR IGNORE INTO projects (id, path, display_name) VALUES ('p','/tmp/p','P')").run();

@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { gatherEntries, buildVars, parseSections, storeReport, generateReport, exportMarkdown } from "./reports";
+import { gatherEntries, buildVars, parseSections, storeReport, generateReport, exportMarkdown, NoEntriesError } from "./reports";
 import { weekRangeForLabel } from "./week";
 import { initDb, closeDb } from "./db";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "fs";
@@ -124,15 +124,22 @@ describe("generateReport", () => {
 
   test("writes nothing when the week has no entries", async () => {
     const empty = weekRangeForLabel("2026-W20");
-    expect(
+    await expect(
       generateReport(db, { range: empty, template, completeImpl: async () => "x" })
     ).rejects.toThrow(/no entries/i);
     const rows = db.query("SELECT COUNT(*) AS n FROM weekly_reports").get() as { n: number };
     expect(rows.n).toBe(0);
   });
 
+  test("rejects with a NoEntriesError, not just any Error, for an empty week", async () => {
+    const empty = weekRangeForLabel("2026-W20");
+    await expect(
+      generateReport(db, { range: empty, template, completeImpl: async () => "x" })
+    ).rejects.toBeInstanceOf(NoEntriesError);
+  });
+
   test("writes nothing when the model call fails", async () => {
-    expect(
+    await expect(
       generateReport(db, {
         range: RANGE,
         template,

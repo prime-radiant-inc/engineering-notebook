@@ -33,13 +33,11 @@ export async function resolveTemplate(opts: {
   if (!opts.url) return { text: DEFAULT_TEMPLATE, source: "default" };
 
   const doFetch = opts.fetchImpl ?? fetch;
+  let text: string;
   try {
     const res = await doFetch(opts.url);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const text = await res.text();
-    mkdirSync(dirname(opts.cachePath), { recursive: true });
-    writeFileSync(opts.cachePath, text);
-    return { text, source: "url" };
+    text = await res.text();
   } catch (err) {
     if (existsSync(opts.cachePath)) {
       return { text: readFileSync(opts.cachePath, "utf-8"), source: "cache" };
@@ -49,6 +47,18 @@ export async function resolveTemplate(opts: {
       `Could not fetch report template from ${opts.url} (${detail}) and no cached copy exists at ${opts.cachePath}`
     );
   }
+
+  // The fetch already succeeded — always return the fresh text with source
+  // "url". A cache-write failure here must not fall back to a stale cache
+  // and misreport its source.
+  try {
+    mkdirSync(dirname(opts.cachePath), { recursive: true });
+    writeFileSync(opts.cachePath, text);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: could not write report template cache at ${opts.cachePath}: ${detail}`);
+  }
+  return { text, source: "url" };
 }
 
 /** Substitute {{name}} placeholders. Unknown placeholders are left untouched. */

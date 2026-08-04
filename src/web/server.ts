@@ -133,9 +133,15 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
     const { renderReports } = await import("./views/reports");
     const startDay = loadConfig().week_start_day ?? 1;
     const week = c.req.query("week");
-    const range = week
-      ? weekRangeForLabel(week, startDay)
-      : lastCompletedWeek(new Date().toISOString().slice(0, 10), startDay);
+    let range;
+    try {
+      range = week
+        ? weekRangeForLabel(week, startDay)
+        : lastCompletedWeek(new Date().toISOString().slice(0, 10), startDay);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.text(msg, 400);
+    }
     return c.html(renderLayout(`Report ${range.label}`, {
       activeTab: "reports",
       fullBody: renderReports(db, range.label),
@@ -152,7 +158,13 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
     const { startJob, renderJobStatus } = await import("./views/reports");
 
     const config = loadConfig();
-    const range = weekRangeForLabel(week, config.week_start_day ?? 1);
+    let range;
+    try {
+      range = weekRangeForLabel(week, config.week_start_day ?? 1);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.text(msg, 400);
+    }
 
     const id = startJob(async () => {
       const template = await resolveTemplate({
@@ -164,8 +176,17 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
         template,
         provider: config.report_provider ?? config.summary_provider,
       });
-      exportMarkdown(expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports"), range.label, result.markdown);
-    });
+
+      // The report is already committed to the database at this point — a
+      // write failure here must warn, not turn a successful generation into
+      // a failed job.
+      try {
+        exportMarkdown(expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports"), range.label, result.markdown);
+      } catch (exportErr) {
+        const msg = exportErr instanceof Error ? exportErr.message : String(exportErr);
+        console.warn(`Warning: report v${result.version} for ${range.label} was stored but could not be exported to disk: ${msg}`);
+      }
+    }, range.label);
 
     return c.html(renderJobStatus(id));
   });
