@@ -265,6 +265,21 @@ export function renderLayout(title: string, content: LayoutContent): string {
       font-size: 12px;
       margin-bottom: 16px;
     }
+    .report-header {
+      padding: 16px 24px 12px;
+      border-bottom: 1px solid #e5e5e5;
+      flex-shrink: 0;
+    }
+    .report-header h1 { margin: 0 0 10px; font-size: 18px; }
+    /* The shell is fixed-height with overflow hidden, so this is the element
+       that actually scrolls. min-height: 0 is required for a flex child to
+       shrink below its content and become scrollable. */
+    .report-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px 24px 48px;
+    }
     .report-markdown {
       max-width: 780px;
       line-height: 1.6;

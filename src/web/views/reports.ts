@@ -46,13 +46,20 @@ export function renderReports(db: Database, weekLabel: string): string {
        <article class="report-markdown">${renderMarkdown(report.markdown)}</article>`
     : `<p class="empty">No report for ${escapeHtml(weekLabel)} yet.</p>`;
 
+  // The header stays put and the report scrolls beneath it. The app shell is
+  // fixed-height with overflow hidden, so without .report-scroll a long report
+  // is simply unreachable.
   return `
-    <h1>Weekly Report — ${escapeHtml(weekLabel)}</h1>
-    <form hx-post="/reports/generate" hx-vals='{"week": "${escapeHtml(weekLabel)}"}' hx-target="#report-status" hx-swap="innerHTML">
-      <button type="submit">Generate</button>
-    </form>
-    <div id="report-status"></div>
-    ${body}
+    <div class="report-header">
+      <h1>Weekly Report — ${escapeHtml(weekLabel)}</h1>
+      <form hx-post="/reports/generate" hx-vals='{"week": "${escapeHtml(weekLabel)}"}' hx-target="#report-status" hx-swap="innerHTML">
+        <button type="submit">Generate</button>
+      </form>
+      <div id="report-status"></div>
+    </div>
+    <div class="report-scroll">
+      ${body}
+    </div>
   `;
 }
 

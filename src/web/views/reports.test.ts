@@ -68,6 +68,28 @@ describe("renderReports", () => {
     expect(html).not.toContain("No report for");
   });
 
+  test("puts the report inside a dedicated scroll container", () => {
+    // The app shell is fixed-height (html, body { overflow: hidden }) and
+    // .full-content also hides overflow, so a long report is unreachable
+    // unless it sits in its own scrollable element.
+    dir = mkdtempSync(join(tmpdir(), "en-reports-view-"));
+    db = initDb(join(dir, "t.db"));
+
+    storeReport(db, {
+      range: weekRangeForLabel("2026-W31"),
+      markdown: "## Summary\n\nlong report body",
+      entryIds: [],
+      templateSource: "default",
+      model: "test-model",
+    });
+
+    const html = renderReports(db, "2026-W31");
+    const scroll = html.indexOf('class="report-scroll"');
+    const article = html.indexOf('class="report-markdown"');
+    expect(scroll).toBeGreaterThan(-1);
+    expect(article).toBeGreaterThan(scroll); // article nested inside the scroller
+  });
+
   test("escapes HTML metacharacters in the markdown instead of emitting live markup", () => {
     dir = mkdtempSync(join(tmpdir(), "en-reports-view-"));
     db = initDb(join(dir, "t.db"));
