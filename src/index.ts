@@ -37,6 +37,30 @@ switch (command) {
       }
     }
 
+    // Stage OpenCode sessions, which live in a SQLite DB rather than one file
+    // per session, into a scannable directory of JSONL files.
+    if (config.opencode?.enabled) {
+      const { syncOpenCodeSessions, cliRunner } = await import("./opencode");
+      const stagingDir = expandPath(config.opencode.staging_dir);
+      console.log("Syncing OpenCode sessions...");
+      try {
+        const ocResult = await syncOpenCodeSessions(stagingDir, cliRunner(), {
+          maxCount: config.opencode.max_count,
+        });
+        console.log(
+          `  OpenCode: ${ocResult.written} exported, ${ocResult.skipped} unchanged`
+        );
+        for (const err of ocResult.errors.slice(0, 5)) {
+          console.log(`  ✗ ${err}`);
+        }
+        sources.push(stagingDir);
+      } catch (err) {
+        console.log(
+          `  ✗ OpenCode sync failed: ${err instanceof Error ? err.message : err}`
+        );
+      }
+    }
+
     console.log(`Scanning ${sources.length} source(s)...`);
     const files = scanSources(sources, config.exclude);
     console.log(`Found ${files.length} session file(s)`);
@@ -73,9 +97,11 @@ switch (command) {
     }
 
     const { summarizeAll } = await import("./summarize");
+    const { providerModel } = await import("./llm");
+    console.log(`Summarizing with ${providerModel(config.summary_provider)}...`);
     const result = await summarizeAll(db, filterDate, filterProject, (done, total, group) => {
       console.log(`[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`);
-    }, config.day_start_hour, config.summary_instructions);
+    }, config.day_start_hour, config.summary_instructions, config.summary_provider);
 
     console.log(`Summarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`);
     if (result.skipped > 0) {
@@ -97,7 +123,8 @@ switch (command) {
     const { SyncManager } = await import("./sync");
     const syncManager = new SyncManager(config, db);
     const { createApp } = await import("./web/server");
-    const app = createApp(db, syncManager);
+    const react = process.argv.includes("--react");
+    const app = createApp(db, syncManager, { react });
     syncManager.startTimer();
 
     const port = (() => {
@@ -112,10 +139,98 @@ switch (command) {
     });
     break;
   }
+  case "title": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+    const { applyDesktopTitles, backfillTitles } = await import("./titles");
+    const applied = applyDesktopTitles(db);
+    console.log(`Applied ${applied} Claude Desktop titles.`);
+    const generate = process.argv.includes("--generate") || process.argv.includes("--all");
+    if (generate) {
+      const limitIdx = process.argv.indexOf("--limit");
+      const limit = limitIdx !== -1 ? parseInt(process.argv[limitIdx + 1]!, 10) : undefined;
+      console.log("Generating titles for Claude Code sessions without one…");
+      const { generated, skipped } = await backfillTitles(db, {
+        limit,
+        onProgress: (done, total, title) => console.log(`  [${done}/${total}] ${title}`),
+      });
+      console.log(`Generated ${generated}, skipped ${skipped}.`);
+    } else {
+      console.log("Pass --generate to also LLM-generate titles for the rest (or --limit N).");
+    }
+    closeDb();
+    break;
+  }
+  case "report": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+
+    const weekIdx = process.argv.indexOf("--week");
+    const weekArg = weekIdx !== -1 ? process.argv[weekIdx + 1] : undefined;
+    const toStdout = process.argv.includes("--stdout");
+
+    const { resolveTemplate } = await import("./report-template");
+    const { generateReport, exportMarkdown, buildPrompt, NoEntriesError } = await import("./reports");
+    const { providerModel, complete } = await import("./llm");
+
+    const provider = config.report_provider ?? config.summary_provider;
+
+    try {
+      const { weekRangeForLabel, lastCompletedWeek } = await import("./week");
+      const startDay = config.week_start_day ?? 1;
+      const today = new Date().toISOString().slice(0, 10);
+      const range = weekArg
+        ? weekRangeForLabel(weekArg, startDay)
+        : lastCompletedWeek(today, startDay);
+
+      console.log(`Generating ${range.label} (${range.start} to ${range.end}) with ${providerModel(provider)}...`);
+
+      const template = await resolveTemplate({
+        url: config.report_template_url,
+        cachePath: expandPath(
+          config.report_template_cache ?? "~/.config/engineering-notebook/report-template.cache.md"
+        ),
+      });
+      if (template.source === "cache") {
+        console.log("  ! template URL unreachable — using the last cached copy");
+      }
+
+      if (toStdout) {
+        const { prompt } = buildPrompt(db, range, template);
+        console.log(await complete(prompt, provider));
+        closeDb();
+        break;
+      }
+
+      const result = await generateReport(db, { range, template, provider });
+
+      // A write failure here does not undo the already-committed report — warn,
+      // do not fail the command.
+      try {
+        const dir = expandPath(config.reports_dir ?? "~/.config/engineering-notebook/reports");
+        const path = exportMarkdown(dir, range.label, result.markdown);
+        console.log(`Wrote ${range.label} v${result.version} to ${path}`);
+      } catch (exportErr) {
+        const msg = exportErr instanceof Error ? exportErr.message : String(exportErr);
+        console.warn(`Warning: report v${result.version} was stored but could not be exported to disk: ${msg}`);
+      }
+    } catch (err) {
+      if (err instanceof NoEntriesError) {
+        console.log(`${err.message} — nothing to report.`);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`Report failed: ${msg}`);
+        process.exitCode = 1;
+      }
+    }
+
+    closeDb();
+    break;
+  }
   case "config":
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|serve|config>");
+    console.log("Usage: notebook <ingest|summarize|report|serve|title|config>");
     process.exit(1);
 }

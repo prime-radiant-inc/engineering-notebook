@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Replace __HOME__ with your home directory before installing. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.engineering-notebook.weekly</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>__HOME__/.config/engineering-notebook/weekly-report.sh</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>__HOME__/.config/engineering-notebook/weekly-report.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.config/engineering-notebook/weekly-report.launchd.log</string>
+</dict>
+</plist>

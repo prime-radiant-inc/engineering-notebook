@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { groupSessionsByDateAndProject, buildSummaryPrompt, parseSummaryResponse, logicalDate, splitConversationByDay } from "./summarize";
+import { groupSessionsByDateAndProject, buildSummaryPrompt, parseSummaryResponse, logicalDate, splitConversationByDay, upsertJournalEntry } from "./summarize";
 import { initDb, closeDb } from "./db";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -254,5 +254,94 @@ describe("groupSessionsByDateAndProject - midnight spanning", () => {
     expect(groups.length).toBe(1);
     expect(groups[0]!.date).toBe("2026-02-21");
     expect(groups[0]!.conversations[0]).toContain("Morning review");
+  });
+});
+
+describe("upsertJournalEntry model attribution", () => {
+  let tempDir: string;
+  let db: ReturnType<typeof initDb>;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "notebook-model-"));
+    db = initDb(join(tempDir, "test.db"));
+    db.exec(`INSERT INTO projects (id, path, display_name) VALUES ('myapp', '/p/myapp', 'myapp')`);
+  });
+
+  afterEach(() => {
+    closeDb();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const group = {
+    date: "2026-07-31",
+    projectId: "myapp",
+    projectName: "myapp",
+    sessionIds: ["s1"],
+    conversations: ["conv"],
+  };
+
+  test("records the model that actually produced the entry", () => {
+    upsertJournalEntry(db, group, {
+      skipped: false,
+      headline: "h",
+      summary: "s",
+      topics: [],
+      openQuestions: [],
+    }, "gemma-4");
+
+    const row = db.query("SELECT model_used FROM journal_entries").get() as { model_used: string };
+    expect(row.model_used).toBe("gemma-4");
+  });
+
+  test("records the model on skip stubs too", () => {
+    upsertJournalEntry(db, group, { skipped: true, skipReason: "nothing" }, "gemma-4");
+
+    const row = db.query("SELECT model_used FROM journal_entries").get() as { model_used: string };
+    expect(row.model_used).toBe("gemma-4");
+  });
+});
+
+describe("re-summarizing an explicitly named date", () => {
+  let tempDir: string;
+  let db: ReturnType<typeof initDb>;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "notebook-resummarize-"));
+    db = initDb(join(tempDir, "test.db"));
+
+    db.exec(`
+      INSERT INTO projects (id, path, display_name, session_count)
+      VALUES ('myapp', '/test/myapp', 'My App', 1);
+
+      INSERT INTO sessions (id, project_id, project_path, source_path, started_at, ended_at, message_count, ingested_at)
+      VALUES ('s-1', 'myapp', '/test/myapp', '/tmp/s1.jsonl', '2026-02-20T10:00:00Z', '2026-02-20T11:00:00Z', 2, datetime('now'));
+
+      INSERT INTO conversations (session_id, conversation_markdown, extracted_at)
+      VALUES ('s-1', '**User (2026-02-20 10:00):** Do the thing\n**Claude (2026-02-20 10:05):** Done.', datetime('now'));
+
+      INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, topics, generated_at, model_used)
+      VALUES ('2026-02-20', 'myapp', '["s-1"]', 'Old headline', 'Stale summary', '[]', datetime('now'), 'test-model');
+    `);
+  });
+
+  afterEach(() => {
+    closeDb();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  test("includes an already-summarized group when its date is named explicitly", () => {
+    // A day that is still being worked on has a stale entry; naming the date is
+    // a deliberate request to regenerate it.
+    const groups = groupSessionsByDateAndProject(db, "2026-02-20");
+    expect(groups.length).toBe(1);
+    expect(groups[0]!.date).toBe("2026-02-20");
+  });
+
+  test("still skips already-summarized groups when no date is named", () => {
+    expect(groupSessionsByDateAndProject(db).length).toBe(0);
+  });
+
+  test("does not return other dates when one date is named", () => {
+    expect(groupSessionsByDateAndProject(db, "2026-02-19").length).toBe(0);
   });
 });

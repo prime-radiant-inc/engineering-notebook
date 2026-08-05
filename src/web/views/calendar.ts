@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { escapeHtml, projectColor } from "./helpers";
 import { excludeWhere } from "./projects";
+import { weekMonday } from "../../week";
 
 type CalendarEntry = {
   date: string;
@@ -10,14 +11,7 @@ type CalendarEntry = {
   entry_id: number | null;
 };
 
-/** Get Monday of the week containing the given date string. */
-export function weekMonday(dateStr: string): string {
-  const d = new Date(dateStr + "T12:00:00Z");
-  const day = d.getUTCDay(); // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day; // shift so Monday=0
-  d.setUTCDate(d.getUTCDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
+export { weekMonday };
 
 /** Get first day of the month containing the given date string. */
 function monthStart(dateStr: string): string {

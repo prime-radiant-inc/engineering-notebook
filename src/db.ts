@@ -61,11 +61,42 @@ export function initDb(dbPath: string): Database {
       UNIQUE(date, project_id)
     );
 
+    CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS session_groups (
+      session_id TEXT PRIMARY KEY,
+      group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      assigned_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS weekly_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      week_label TEXT NOT NULL,
+      week_start TEXT NOT NULL,
+      week_end TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      markdown TEXT NOT NULL,
+      sections TEXT NOT NULL DEFAULT '{}',
+      entry_ids TEXT NOT NULL DEFAULT '[]',
+      template_source TEXT NOT NULL,
+      model_used TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      UNIQUE(week_label, version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_groups_group ON session_groups(group_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);
     CREATE INDEX IF NOT EXISTS idx_journal_date ON journal_entries(date);
     CREATE INDEX IF NOT EXISTS idx_journal_project ON journal_entries(project_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source_path);
+    CREATE INDEX IF NOT EXISTS idx_weekly_reports_week
+      ON weekly_reports(week_label, version DESC);
   `);
 
   // Migrations
@@ -78,6 +109,27 @@ export function initDb(dbPath: string): Database {
     db.exec(`ALTER TABLE sessions ADD COLUMN is_subagent INTEGER NOT NULL DEFAULT 0`);
   } catch {
     // Column already exists — ignore
+  }
+  try {
+    db.exec(`ALTER TABLE groups ADD COLUMN desktop_id TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN title TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    // 'desktop' | 'user' (renamed in Desktop) | 'generated' (LLM)
+    db.exec(`ALTER TABLE sessions ADD COLUMN title_source TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_desktop_id ON groups(desktop_id) WHERE desktop_id IS NOT NULL`);
+  } catch {
+    // Index already exists — ignore
   }
 
   _db = db;

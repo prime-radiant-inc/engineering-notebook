@@ -55,4 +55,21 @@ describe("db", () => {
     const result = db.query("SELECT 1 as ok").get() as { ok: number };
     expect(result.ok).toBe(1);
   });
+
+  test("initDb creates groups and session_groups tables", () => {
+    const db = initDb(dbPath);
+    const names = (
+      db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+    ).map((t) => t.name);
+    expect(names).toContain("groups");
+    expect(names).toContain("session_groups");
+  });
+
+  test("session_groups.session_id has no foreign key (survives session delete)", () => {
+    const db = initDb(dbPath);
+    const fks = db.query("PRAGMA foreign_key_list(session_groups)").all() as { table: string }[];
+    // Only group_id -> groups may exist; sessions must NOT be referenced
+    expect(fks.some((f) => f.table === "sessions")).toBe(false);
+    expect(fks.some((f) => f.table === "groups")).toBe(true);
+  });
 });

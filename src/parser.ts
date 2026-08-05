@@ -22,6 +22,12 @@ export type ParsedSession = {
   endedAt: string | null;
   messages: ParsedMessage[];
   messageCount: number;
+  /**
+   * Whether this session is a subagent run, when the format states it
+   * outright. Left undefined for Claude Code, whose parentSessionId covers
+   * continuations too and so is decided from the file path instead.
+   */
+  isSubagent?: boolean;
   toMarkdown: () => string;
 };
 
@@ -39,6 +45,19 @@ type RawRecord = {
   timestamp?: string;
   uuid?: string;
   isCompactSummary?: boolean;
+};
+
+type OpenCodeMetaRecord = {
+  type: string;
+  timestamp?: string;
+  payload?: {
+    id?: string;
+    cwd?: string;
+    title?: string;
+    version?: string;
+    parent_id?: string | null;
+    model?: string | null;
+  };
 };
 
 type CodexRecord = {
@@ -165,6 +184,7 @@ export function parseSession(filePath: string): ParsedSession {
 
   let firstRecordSessionId: string | null = null;
   let parentSessionId: string | null = null;
+  let continuationParentId: string | null = null;
   let projectPath = "";
   let gitBranch: string | null = null;
   let version: string | null = null;
@@ -172,6 +192,7 @@ export function parseSession(filePath: string): ParsedSession {
   let lastTimestamp: string | null = null;
   const messages: ParsedMessage[] = [];
   let codexFormat = false;
+  let openCodeFormat = false;
   let assistantDisplayName = "Claude";
 
   for (const line of lines) {
@@ -180,6 +201,27 @@ export function parseSession(filePath: string): ParsedSession {
       parsed = JSON.parse(line);
     } catch {
       continue; // skip malformed lines
+    }
+
+    // OpenCode sessions are staged by the adapter as an `opencode_meta` header
+    // followed by Claude-Code-shaped message records, so only the header needs
+    // handling here — the message records fall through to the normal path.
+    const openCodeRecord = parsed as OpenCodeMetaRecord;
+    if (openCodeRecord.type === "opencode_meta") {
+      assistantDisplayName = "OpenCode";
+      openCodeFormat = true;
+
+      if (openCodeRecord.timestamp) {
+        if (!firstTimestamp) firstTimestamp = openCodeRecord.timestamp;
+        lastTimestamp = openCodeRecord.timestamp;
+      }
+
+      const payload = openCodeRecord.payload;
+      if (payload?.id) sessionId = payload.id;
+      if (payload?.cwd && !projectPath) projectPath = payload.cwd;
+      if (payload?.version && !version) version = payload.version;
+      if (payload?.parent_id) parentSessionId = payload.parent_id;
+      continue;
     }
 
     const codexRecord = parsed as CodexRecord;
@@ -231,13 +273,19 @@ export function parseSession(filePath: string): ParsedSession {
     const isSubagentFile = filePath.includes("/subagents/");
     if (record.sessionId && !firstRecordSessionId) {
       firstRecordSessionId = record.sessionId;
-      if (!isSubagentFile && firstRecordSessionId !== fileSessionId) {
+      if (firstRecordSessionId !== fileSessionId) {
+        // The link back to the originating session — recorded for BOTH
+        // subagents and continuations.
         parentSessionId = firstRecordSessionId;
+        // Only true continuations replay the parent's records as a prefix to
+        // skip. A subagent's own records all carry the parent's sessionId, so
+        // skipping them would erase the whole transcript.
+        if (!isSubagentFile) continuationParentId = firstRecordSessionId;
       }
     }
 
     // For continuation files, skip prefix records from the parent session
-    if (parentSessionId && record.sessionId === parentSessionId) {
+    if (continuationParentId && record.sessionId === continuationParentId) {
       continue;
     }
 
@@ -295,6 +343,7 @@ export function parseSession(filePath: string): ParsedSession {
     endedAt: lastTimestamp || null,
     messages,
     messageCount: messages.length,
+    isSubagent: openCodeFormat ? parentSessionId !== null : undefined,
     toMarkdown() {
       const startTime = firstTimestamp ? formatTime(firstTimestamp) : "??:??";
       const endTime = lastTimestamp ? formatTime(lastTimestamp) : "??:??";

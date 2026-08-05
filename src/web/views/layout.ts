@@ -9,12 +9,12 @@ type ThreePanelContent = {
 
 type SingleContent = {
   body: string;
-  activeTab?: "calendar";
+  activeTab?: "calendar" | "groups";
 };
 
 type FullWidthContent = {
   fullBody: string;
-  activeTab: "calendar";
+  activeTab: "calendar" | "reports";
 };
 
 type LayoutContent = ThreePanelContent | SingleContent | FullWidthContent;
@@ -34,6 +34,8 @@ export function renderLayout(title: string, content: LayoutContent): string {
   const journalActive = activeTab === "journal";
   const projectsActive = activeTab === "projects";
   const calendarActive = activeTab === "calendar";
+  const groupsActive = activeTab === "groups";
+  const reportsActive = activeTab === "reports";
 
   let bodyHtml: string;
   if (isThreePanel(content)) {
@@ -67,6 +69,7 @@ export function renderLayout(title: string, content: LayoutContent): string {
       --text-muted: #57534e;
       --text-faint: #78716c;
       --text-ghost: #a8a29e;
+      --accent: #1a6b5a;
       --font-serif: Georgia, 'Times New Roman', serif;
       --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     }
@@ -256,6 +259,46 @@ export function renderLayout(title: string, content: LayoutContent): string {
       color: var(--text);
       font-family: var(--font-serif);
       margin-bottom: 6px;
+    }
+    .report-meta {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 16px;
+    }
+    .report-header {
+      padding: 16px 24px 12px;
+      border-bottom: 1px solid #e5e5e5;
+      flex-shrink: 0;
+    }
+    .report-header h1 { margin: 0 0 10px; font-size: 18px; }
+    /* The shell is fixed-height with overflow hidden, so this is the element
+       that actually scrolls. min-height: 0 is required for a flex child to
+       shrink below its content and become scrollable. */
+    .report-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 16px 24px 48px;
+    }
+    .report-markdown {
+      max-width: 780px;
+      line-height: 1.6;
+    }
+    .report-markdown h2 {
+      font-size: 16px;
+      margin: 24px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #e5e5e5;
+    }
+    .report-markdown h3 { font-size: 14px; margin: 16px 0 6px; }
+    .report-markdown p { margin: 0 0 12px; }
+    .report-markdown ul { margin: 0 0 12px; padding-left: 22px; }
+    .report-markdown li { margin-bottom: 4px; }
+    .report-markdown code {
+      background: #f4f4f4;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 12px;
     }
     .entry-summary {
       font-size: 13px;
@@ -700,6 +743,18 @@ export function renderLayout(title: string, content: LayoutContent): string {
     }
     a { color: var(--text-muted); }
     a:hover { color: var(--text); }
+
+    .transcript-toggle { display:flex; gap:12px; margin-bottom:14px; font-size:12px; }
+    .transcript-thinking { background:var(--surface); border-radius:14px 14px 14px 4px; padding:10px 14px; margin:8px 0; color:var(--text-muted); font-style:italic; font-size:12px; white-space:pre-wrap; }
+    .transcript-thinking .tokens { display:block; text-align:right; font-size:10px; color:var(--text-ghost); font-style:normal; margin-top:6px; }
+    .transcript-tool { border:1px solid var(--border); border-radius:10px; padding:6px 10px; margin:8px 0; font-size:12px; }
+    details.transcript-tool > summary { cursor:pointer; list-style:none; color:var(--text-muted); }
+    details.transcript-tool > summary::-webkit-details-marker { display:none; }
+    .transcript-tool .tool-name { color:var(--accent); font-weight:600; font-family:var(--font-sans); }
+    .transcript-tool .tool-preview { color:var(--text-faint); margin-left:8px; font-family:monospace; }
+    .transcript-tool pre { white-space:pre-wrap; margin:6px 0 0; font-family:monospace; font-size:11px; }
+    .transcript-tool .tool-result { border-top:1px solid var(--border-subtle); margin-top:6px; padding-top:6px; }
+    .transcript-warning { color:#b91c1c; font-size:12px; margin:8px 0; }
   </style>
 </head>
 <body>
@@ -709,6 +764,8 @@ export function renderLayout(title: string, content: LayoutContent): string {
       <a href="/"${journalActive ? ' class="active"' : ""}>Journal</a>
       <a href="/projects"${projectsActive ? ' class="active"' : ""}>Projects</a>
       <a href="/calendar"${calendarActive ? ' class="active"' : ""}>Calendar</a>
+      <a href="/groups"${groupsActive ? ' class="active"' : ""}>Groups</a>
+      <a href="/reports"${reportsActive ? ' class="active"' : ""}>Reports</a>
     </nav>
     <div class="spacer"></div>
     <form action="/search" method="get" style="display:flex;">
