@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import {
   existsSync,
   readFileSync,
+  readdirSync,
   writeFileSync,
   mkdtempSync,
   rmSync,
@@ -85,6 +86,36 @@ describe("server", () => {
       const app = createApp(db, syncManager);
       const res = await app.request("/api/journal/entries?date=2026-08-05");
       expect(res.headers.get("content-type")).toContain("application/json");
+    });
+  });
+
+  describe("fragment routes stay out of the /api namespace", () => {
+    // Structural guard. /api belongs to the React JSON API, which is mounted
+    // first and wins on any colliding path. A view that points an hx-* at /api
+    // is one rename away from silently swapping JSON into a panel.
+    test("no view emits an hx-* attribute pointing at /api", () => {
+      const dir = join(import.meta.dir, "views");
+      const offenders: string[] = [];
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+        const src = readFileSync(join(dir, file), "utf-8");
+        for (const m of src.matchAll(/hx-(?:get|post)="(\/api\/[^"]*)"/g)) {
+          offenders.push(`${file}: ${m[1]}`);
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    test("the conversation fragment returns HTML from /hx", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/hx/journal/conversation?entry_id=1");
+      expect(res.headers.get("content-type")).toContain("text/html");
+    });
+
+    test("the iCal feed stays on /api, since it is a public subscription URL", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/api/calendar.ics");
+      expect(res.status).toBe(200);
     });
   });
 
@@ -184,18 +215,18 @@ describe("server", () => {
   });
 
   describe("sync API routes", () => {
-    test("GET /api/sync/status returns status HTML", async () => {
+    test("GET /hx/sync/status returns status HTML", async () => {
       const app = createApp(db, syncManager);
-      const res = await app.request("/api/sync/status");
+      const res = await app.request("/hx/sync/status");
       expect(res.status).toBe(200);
       const html = await res.text();
       expect(html).toContain("sync-status-panel");
       expect(html).toContain("No sync has run yet");
     });
 
-    test("POST /api/sync returns syncing status", async () => {
+    test("POST /hx/sync returns syncing status", async () => {
       const app = createApp(db, syncManager);
-      const res = await app.request("/api/sync", { method: "POST" });
+      const res = await app.request("/hx/sync", { method: "POST" });
       expect(res.status).toBe(200);
       const html = await res.text();
       expect(html).toContain("sync-status-panel");

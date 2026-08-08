@@ -196,7 +196,7 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   });
 
   // Journal: load conversation for an entry (Panel 3)
-  app.get("/api/journal/conversation", (c) => {
+  app.get("/hx/journal/conversation", (c) => {
     const entryId = parseInt(c.req.query("entry_id") || "0");
     const sessionIdx = parseInt(c.req.query("session_idx") || "0");
     if (!entryId) return c.text("Missing entry_id", 400);
@@ -204,7 +204,7 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   });
 
   // Projects: load timeline for a project (Panel 2)
-  app.get("/api/projects/timeline", (c) => {
+  app.get("/hx/projects/timeline", (c) => {
     const config = loadConfig();
     const projectId = c.req.query("project");
     if (!projectId) return c.text("Missing project", 400);
@@ -218,7 +218,7 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   });
 
   // Projects: on-demand summarize a single project+date
-  app.get("/api/projects/summarize", async (c) => {
+  app.get("/hx/projects/summarize", async (c) => {
     const projectId = c.req.query("project");
     const date = c.req.query("date");
     if (!projectId || !date) return c.text("Missing project or date", 400);
@@ -250,24 +250,24 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   });
 
   // Sync: trigger sync+ingest
-  app.post("/api/sync", (c) => {
+  app.post("/hx/sync", (c) => {
     syncManager.runSync();
     return c.html(renderSyncStatus(syncManager.getStatus()));
   });
 
   // Summarize: trigger bulk summarization
-  app.post("/api/summarize", (c) => {
+  app.post("/hx/summarize", (c) => {
     syncManager.runSummarize();
     return c.html(renderSyncStatus(syncManager.getStatus()));
   });
 
   // Sync: get current status
-  app.get("/api/sync/status", (c) => {
+  app.get("/hx/sync/status", (c) => {
     return c.html(renderSyncStatus(syncManager.getStatus()));
   });
 
   // Remote sources: new card fragment
-  app.get("/api/settings/remote-source-card", (c) => {
+  app.get("/hx/settings/remote-source-card", (c) => {
     const index = parseInt(c.req.query("index") || "0", 10);
     // Count existing cards by finding the next available index
     // The client doesn't send the count, so we use a JS-assigned index via htmx
@@ -277,7 +277,7 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   });
 
   // Remote sources: test SSH connection
-  app.post("/api/settings/test-connection", async (c) => {
+  app.post("/hx/settings/test-connection", async (c) => {
     const body = await c.req.parseBody();
     // hx-include sends the field by its indexed name, so find any remote_host_* field
     const host = Object.entries(body)

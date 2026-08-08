@@ -84,7 +84,7 @@ export function renderJournalEntries(db: Database, date: string, selectedEntryId
     // Compute time range from sessions
     const timeRange = getSessionTimeRange(db, sessionIds);
 
-    html += `<a class="entry-card${isSelected ? " selected" : ""}" href="/?date=${date}&entry=${entry.id}" hx-get="/api/journal/conversation?entry_id=${entry.id}" hx-target="#panel-detail">`;
+    html += `<a class="entry-card${isSelected ? " selected" : ""}" href="/?date=${date}&entry=${entry.id}" hx-get="/hx/journal/conversation?entry_id=${entry.id}" hx-target="#panel-detail">`;
     html += `<div class="entry-label">${escapeHtml(entry.display_name)}</div>`;
     if (entry.headline) {
       html += `<div class="entry-headline">${escapeHtml(entry.headline)}</div>`;
@@ -182,10 +182,10 @@ export function renderEntryConversations(db: Database, entryId: number, sessionI
     html += `<div class="conversation-nav">`;
     html += `Session ${idx + 1} of ${sessionIds.length}`;
     if (idx > 0) {
-      html += ` · <a hx-get="/api/journal/conversation?entry_id=${entryId}&session_idx=${idx - 1}" hx-target="#panel-detail">&larr; Prev</a>`;
+      html += ` · <a hx-get="/hx/journal/conversation?entry_id=${entryId}&session_idx=${idx - 1}" hx-target="#panel-detail">&larr; Prev</a>`;
     }
     if (idx < sessionIds.length - 1) {
-      html += ` · <a hx-get="/api/journal/conversation?entry_id=${entryId}&session_idx=${idx + 1}" hx-target="#panel-detail">Next &rarr;</a>`;
+      html += ` · <a hx-get="/hx/journal/conversation?entry_id=${entryId}&session_idx=${idx + 1}" hx-target="#panel-detail">Next &rarr;</a>`;
     }
     html += `</div>`;
   }
