@@ -47,7 +47,7 @@ export function renderJournalDateIndex(db: Database, selectedDate?: string): str
     for (const date of bucketDates) {
       const isSelected = date === selectedDate;
       const projects = projectsByDate.get(date) || "";
-      html += `<a class="index-item${isSelected ? " selected" : ""}" href="/?date=${date}" hx-get="/api/journal/entries?date=${date}" hx-target="#panel-entries" hx-push-url="/?date=${date}">`;
+      html += `<a class="index-item${isSelected ? " selected" : ""}" href="/?date=${date}" hx-get="/hx/journal/entries?date=${date}" hx-target="#panel-entries" hx-push-url="/?date=${date}">`;
       html += `<div class="index-item-title">${formatDateShort(date)}</div>`;
       const projectList = projects.split(",").map(p => escapeHtml(p.trim())).join("<br>");
       html += `<div class="index-item-sub">${projectList}</div>`;

@@ -186,7 +186,10 @@ export function createApp(db: Database, syncManager: SyncManager, opts: { react?
   // ──────────────────────────────────────────
 
   // Journal: load entries for a date (Panel 2)
-  app.get("/api/journal/entries", (c) => {
+  // Fragment routes live under /hx, not /api: the React JSON API is mounted at
+  // /api first, and Hono matches in registration order, so a colliding path
+  // there silently wins and HTMX swaps JSON into the panel.
+  app.get("/hx/journal/entries", (c) => {
     const date = c.req.query("date");
     if (!date) return c.text("Missing date", 400);
     return c.html(renderJournalEntries(db, date));

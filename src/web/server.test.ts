@@ -69,6 +69,25 @@ describe("server", () => {
     return form;
   }
 
+  describe("HTMX fragment routes are not shadowed by the JSON API", () => {
+    // The React JSON API is mounted at /api before these routes are declared,
+    // and Hono matches in registration order. A JSON router path that collides
+    // with a fragment path silently wins, and HTMX swaps raw JSON into the
+    // panel. That is what broke the journal middle panel.
+    test("the journal entries fragment returns HTML, not JSON", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/hx/journal/entries?date=2026-08-05");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+    });
+
+    test("the JSON API keeps its own journal entries route", async () => {
+      const app = createApp(db, syncManager);
+      const res = await app.request("/api/journal/entries?date=2026-08-05");
+      expect(res.headers.get("content-type")).toContain("application/json");
+    });
+  });
+
   describe("POST /settings remote source parsing", () => {
     test("saves remote sources with non-sequential (timestamp) indices", async () => {
       const app = createApp(db, syncManager);
