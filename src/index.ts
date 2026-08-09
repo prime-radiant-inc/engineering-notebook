@@ -97,7 +97,8 @@ switch (command) {
     const { SyncManager } = await import("./sync");
     const syncManager = new SyncManager(config, db);
     const { createApp } = await import("./web/server");
-    const app = createApp(db, syncManager);
+    const react = process.argv.includes("--react");
+    const app = createApp(db, syncManager, { react });
     syncManager.startTimer();
 
     const port = (() => {
@@ -112,10 +113,32 @@ switch (command) {
     });
     break;
   }
+  case "title": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+    const { applyDesktopTitles, backfillTitles } = await import("./titles");
+    const applied = applyDesktopTitles(db);
+    console.log(`Applied ${applied} Claude Desktop titles.`);
+    const generate = process.argv.includes("--generate") || process.argv.includes("--all");
+    if (generate) {
+      const limitIdx = process.argv.indexOf("--limit");
+      const limit = limitIdx !== -1 ? parseInt(process.argv[limitIdx + 1]!, 10) : undefined;
+      console.log("Generating titles for Claude Code sessions without one…");
+      const { generated, skipped } = await backfillTitles(db, {
+        limit,
+        onProgress: (done, total, title) => console.log(`  [${done}/${total}] ${title}`),
+      });
+      console.log(`Generated ${generated}, skipped ${skipped}.`);
+    } else {
+      console.log("Pass --generate to also LLM-generate titles for the rest (or --limit N).");
+    }
+    closeDb();
+    break;
+  }
   case "config":
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|serve|config>");
+    console.log("Usage: notebook <ingest|summarize|serve|title|config>");
     process.exit(1);
 }

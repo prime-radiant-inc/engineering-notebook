@@ -19,6 +19,22 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
 
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # web/ is not a workspace of the root package, so its dependencies have
+      # to be installed separately before vitest can run.
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      - run: bunx vitest run
+        working-directory: web
+
   typecheck:
     runs-on: ubuntu-latest
     steps:

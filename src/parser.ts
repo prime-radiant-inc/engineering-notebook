@@ -165,6 +165,7 @@ export function parseSession(filePath: string): ParsedSession {
 
   let firstRecordSessionId: string | null = null;
   let parentSessionId: string | null = null;
+  let continuationParentId: string | null = null;
   let projectPath = "";
   let gitBranch: string | null = null;
   let version: string | null = null;
@@ -231,13 +232,19 @@ export function parseSession(filePath: string): ParsedSession {
     const isSubagentFile = filePath.includes("/subagents/");
     if (record.sessionId && !firstRecordSessionId) {
       firstRecordSessionId = record.sessionId;
-      if (!isSubagentFile && firstRecordSessionId !== fileSessionId) {
+      if (firstRecordSessionId !== fileSessionId) {
+        // The link back to the originating session — recorded for BOTH
+        // subagents and continuations.
         parentSessionId = firstRecordSessionId;
+        // Only true continuations replay the parent's records as a prefix to
+        // skip. A subagent's own records all carry the parent's sessionId, so
+        // skipping them would erase the whole transcript.
+        if (!isSubagentFile) continuationParentId = firstRecordSessionId;
       }
     }
 
     // For continuation files, skip prefix records from the parent session
-    if (parentSessionId && record.sessionId === parentSessionId) {
+    if (continuationParentId && record.sessionId === continuationParentId) {
       continue;
     }
 

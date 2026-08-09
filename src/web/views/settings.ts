@@ -31,7 +31,7 @@ export function renderRemoteSourceCard(
         <input type="checkbox" name="remote_enabled_${index}" ${enabled ? "checked" : ""}> Enabled
       </label>
       <button type="button" class="settings-btn-secondary"
-        hx-post="/api/settings/test-connection"
+        hx-post="/hx/settings/test-connection"
         hx-include="[name=remote_host_${index}]"
         hx-target="next .connection-status" hx-swap="innerHTML">Test Connection</button>
       <span class="connection-status"></span>
@@ -45,12 +45,12 @@ export function renderSyncStatus(status: SyncStatus): string {
   const trigger = polling ? `hx-trigger="load, every 5s"` : `hx-trigger="load"`;
 
   if (!status.lastRun && !status.inProgress && !status.summarizeInProgress) {
-    return `<div class="sync-status-panel" ${trigger} hx-get="/api/sync/status" hx-swap="outerHTML">
+    return `<div class="sync-status-panel" ${trigger} hx-get="/hx/sync/status" hx-swap="outerHTML">
       <div class="sync-stats">No sync has run yet.</div>
     </div>`;
   }
 
-  let html = `<div class="sync-status-panel" ${trigger} hx-get="/api/sync/status" hx-swap="outerHTML">`;
+  let html = `<div class="sync-status-panel" ${trigger} hx-get="/hx/sync/status" hx-swap="outerHTML">`;
 
   if (status.inProgress) {
     html += `<div class="sync-status-spinner">Syncing\u2026</div>`;
@@ -157,7 +157,7 @@ export function renderSettings(config: Config): string {
     html += renderRemoteSourceCard(i, remoteSources[i]);
   }
   html += `</div>`;
-  html += `<button type="button" class="settings-btn-secondary" hx-get="/api/settings/remote-source-card" hx-target="#remote-sources-list" hx-swap="beforeend">+ Add Remote Source</button>`;
+  html += `<button type="button" class="settings-btn-secondary" hx-get="/hx/settings/remote-source-card" hx-target="#remote-sources-list" hx-swap="beforeend">+ Add Remote Source</button>`;
   html += `</div>`;
 
   // Sync
@@ -169,11 +169,11 @@ export function renderSettings(config: Config): string {
   html += `<span style="font-size: 12px; color: var(--text-faint);">minutes</span>`;
   html += `</div>`;
   html += `<div style="display: flex; gap: 8px;">`;
-  html += `<button type="button" class="settings-btn-secondary" hx-post="/api/sync" hx-target="#sync-status" hx-swap="innerHTML">Sync Now</button>`;
-  html += `<button type="button" class="settings-btn-secondary" hx-post="/api/summarize" hx-target="#sync-status" hx-swap="innerHTML">Summarize All</button>`;
+  html += `<button type="button" class="settings-btn-secondary" hx-post="/hx/sync" hx-target="#sync-status" hx-swap="innerHTML">Sync Now</button>`;
+  html += `<button type="button" class="settings-btn-secondary" hx-post="/hx/summarize" hx-target="#sync-status" hx-swap="innerHTML">Summarize All</button>`;
   html += `</div>`;
   html += `<div id="sync-status" style="margin-top: 12px;">`;
-  html += `<div hx-get="/api/sync/status" hx-trigger="load" hx-swap="outerHTML"></div>`;
+  html += `<div hx-get="/hx/sync/status" hx-trigger="load" hx-swap="outerHTML"></div>`;
   html += `</div>`;
   html += `</div>`;
 

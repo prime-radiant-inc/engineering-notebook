@@ -7,12 +7,26 @@ import { renderSearch, renderSearchResults } from "./views/search";
 import { renderSettings, renderRemoteSourceCard, renderSyncStatus } from "./views/settings";
 import { renderSessionDetail } from "./views/session";
 import { renderCalendarPage, renderIcalFeed, weekMonday } from "./views/calendar";
+import { renderGroupsIndex, renderGroupDetail } from "./views/groups";
+import { createGroup, renameGroup, deleteGroup, assignSession } from "../groups";
 import { escapeHtml } from "./views/helpers";
 import { loadConfig, saveConfig, resolveConfigPath, type RemoteSource } from "../config";
 import type { SyncManager } from "../sync";
+import { createApiRouter } from "./api";
+import { serveStatic } from "hono/bun";
 
-export function createApp(db: Database, syncManager: SyncManager): Hono {
+export function createApp(db: Database, syncManager: SyncManager, opts: { react?: boolean } = {}): Hono {
   const app = new Hono();
+
+  // JSON API for the React frontend (additive; legacy routes below unchanged)
+  app.route("/api", createApiRouter(db));
+
+  // React mode: serve the built SPA from web/dist and skip the legacy views.
+  if (opts.react) {
+    app.use("/*", serveStatic({ root: "./web/dist" }));
+    app.get("/*", serveStatic({ path: "./web/dist/index.html" }));
+    return app;
+  }
 
   // ──────────────────────────────────────────
   // Full-page routes
@@ -74,7 +88,9 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   // Session detail — show in journal context
   app.get("/session/:id", (c) => {
     const sessionId = c.req.param("id");
-    const panel3 = renderSessionDetail(db, sessionId);
+    const showThinking = c.req.query("thinking") === "1";
+    const showTools = c.req.query("tools") === "1";
+    const panel3 = renderSessionDetail(db, sessionId, { showThinking, showTools });
     // Find the date for this session to select it in the index
     const session = db.query(`SELECT date(started_at) as date FROM sessions WHERE id = ?`).get(sessionId) as { date: string } | null;
     const date = session?.date;
@@ -170,14 +186,17 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   // ──────────────────────────────────────────
 
   // Journal: load entries for a date (Panel 2)
-  app.get("/api/journal/entries", (c) => {
+  // Fragment routes live under /hx, not /api: the React JSON API is mounted at
+  // /api first, and Hono matches in registration order, so a colliding path
+  // there silently wins and HTMX swaps JSON into the panel.
+  app.get("/hx/journal/entries", (c) => {
     const date = c.req.query("date");
     if (!date) return c.text("Missing date", 400);
     return c.html(renderJournalEntries(db, date));
   });
 
   // Journal: load conversation for an entry (Panel 3)
-  app.get("/api/journal/conversation", (c) => {
+  app.get("/hx/journal/conversation", (c) => {
     const entryId = parseInt(c.req.query("entry_id") || "0");
     const sessionIdx = parseInt(c.req.query("session_idx") || "0");
     if (!entryId) return c.text("Missing entry_id", 400);
@@ -185,7 +204,7 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   });
 
   // Projects: load timeline for a project (Panel 2)
-  app.get("/api/projects/timeline", (c) => {
+  app.get("/hx/projects/timeline", (c) => {
     const config = loadConfig();
     const projectId = c.req.query("project");
     if (!projectId) return c.text("Missing project", 400);
@@ -199,7 +218,7 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   });
 
   // Projects: on-demand summarize a single project+date
-  app.get("/api/projects/summarize", async (c) => {
+  app.get("/hx/projects/summarize", async (c) => {
     const projectId = c.req.query("project");
     const date = c.req.query("date");
     if (!projectId || !date) return c.text("Missing project or date", 400);
@@ -219,36 +238,36 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
       }
       // Skipped or no groups — show a muted card
       return c.html(`<div class="entry-card" style="opacity: 0.5;">
-        <div class="entry-label">${date}</div>
+        <div class="entry-label">${escapeHtml(date)}</div>
         <div class="entry-summary" style="color: var(--text-ghost); font-style: italic;">No journal-worthy sessions on this date.</div>
       </div>`);
     } catch (err) {
       return c.html(`<div class="entry-card" style="opacity: 0.5;">
-        <div class="entry-label">${date}</div>
+        <div class="entry-label">${escapeHtml(date)}</div>
         <div class="entry-summary" style="color: #b91c1c; font-style: italic;">Summary failed: ${escapeHtml(String(err))}</div>
       </div>`);
     }
   });
 
   // Sync: trigger sync+ingest
-  app.post("/api/sync", (c) => {
+  app.post("/hx/sync", (c) => {
     syncManager.runSync();
     return c.html(renderSyncStatus(syncManager.getStatus()));
   });
 
   // Summarize: trigger bulk summarization
-  app.post("/api/summarize", (c) => {
+  app.post("/hx/summarize", (c) => {
     syncManager.runSummarize();
     return c.html(renderSyncStatus(syncManager.getStatus()));
   });
 
   // Sync: get current status
-  app.get("/api/sync/status", (c) => {
+  app.get("/hx/sync/status", (c) => {
     return c.html(renderSyncStatus(syncManager.getStatus()));
   });
 
   // Remote sources: new card fragment
-  app.get("/api/settings/remote-source-card", (c) => {
+  app.get("/hx/settings/remote-source-card", (c) => {
     const index = parseInt(c.req.query("index") || "0", 10);
     // Count existing cards by finding the next available index
     // The client doesn't send the count, so we use a JS-assigned index via htmx
@@ -258,7 +277,7 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
   });
 
   // Remote sources: test SSH connection
-  app.post("/api/settings/test-connection", async (c) => {
+  app.post("/hx/settings/test-connection", async (c) => {
     const body = await c.req.parseBody();
     // hx-include sends the field by its indexed name, so find any remote_host_* field
     const host = Object.entries(body)
@@ -272,6 +291,74 @@ export function createApp(db: Database, syncManager: SyncManager): Hono {
       return c.html(`<span class="connection-error">${escapeHtml(error)}</span>`);
     }
     return c.html(`<span class="connection-ok">Connected</span>`);
+  });
+
+  // ──────────────────────────────────────────
+  // Groups
+  // ──────────────────────────────────────────
+
+  app.get("/groups", (c) => {
+    const error = c.req.query("error") || undefined;
+    return c.html(renderLayout("Groups — Engineering Notebook", {
+      body: renderGroupsIndex(db, error),
+      activeTab: "groups",
+    }));
+  });
+
+  app.get("/groups/:id", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const body = isNaN(id) ? null : renderGroupDetail(db, id);
+    if (!body) return c.text("Group not found", 404);
+    return c.html(renderLayout("Group — Engineering Notebook", {
+      body,
+      activeTab: "groups",
+    }));
+  });
+
+  app.post("/groups", async (c) => {
+    const form = await c.req.parseBody();
+    try {
+      createGroup(db, (form.name as string) || "");
+    } catch (err) {
+      return c.html(renderLayout("Groups — Engineering Notebook", {
+        body: renderGroupsIndex(db, String(err instanceof Error ? err.message : err)),
+        activeTab: "groups",
+      }));
+    }
+    return c.redirect("/groups");
+  });
+
+  app.post("/groups/:id/rename", async (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const form = await c.req.parseBody();
+    try {
+      renameGroup(db, id, (form.name as string) || "");
+    } catch (err) {
+      return c.html(renderLayout("Groups — Engineering Notebook", {
+        body: renderGroupsIndex(db, String(err instanceof Error ? err.message : err)),
+        activeTab: "groups",
+      }));
+    }
+    return c.redirect(`/groups/${id}`);
+  });
+
+  app.post("/groups/:id/delete", (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    if (!isNaN(id)) deleteGroup(db, id);
+    return c.redirect("/groups");
+  });
+
+  app.post("/sessions/:id/group", async (c) => {
+    const sessionId = c.req.param("id");
+    const form = await c.req.parseBody();
+    const raw = (form.group_id as string) || "";
+    const groupId = raw === "" ? null : parseInt(raw, 10);
+    try {
+      assignSession(db, sessionId, groupId === null || isNaN(groupId) ? null : groupId);
+    } catch {
+      // invalid/stale group_id (e.g. group deleted in another tab) — ignore, don't 500
+    }
+    return c.redirect(`/session/${encodeURIComponent(sessionId)}`);
   });
 
   return app;

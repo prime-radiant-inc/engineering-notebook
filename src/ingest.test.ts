@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { scanSources, ingestSessions } from "./ingest";
+import { scanSources, ingestSessions, relinkSubagents } from "./ingest";
 import { initDb, closeDb } from "./db";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, copyFileSync } from "fs";
 import { join } from "path";
@@ -169,5 +169,125 @@ describe("ingestSessions", () => {
     expect(session?.project_path).toBe("/Users/peteror/Code/engineering-notebook");
     expect(session?.version).toBe("0.99.0-alpha.23");
     expect(session?.message_count).toBe(2);
+  });
+});
+
+describe("relinkSubagents", () => {
+  let tempDir: string;
+  let db: ReturnType<typeof initDb>;
+  const PARENT = "b013d855-ab92-4740-9b0a-385abb8a1d8c";
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "notebook-relink-test-"));
+    db = initDb(join(tempDir, "test.db"));
+  });
+
+  afterEach(() => {
+    closeDb();
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // Writes a parent session (cwd -> project "alpha") and one subagent whose own
+  // cwd -> project "beta", nested under <projectDir>/<PARENT>/subagents/.
+  function writeParentAndSubagent(): { parentFile: string; subagentFile: string } {
+    const projectDir = join(tempDir, "-Users-test-alpha");
+    const parentFile = join(projectDir, `${PARENT}.jsonl`);
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      parentFile,
+      [
+        JSON.stringify({ type: "user", sessionId: PARENT, uuid: "u1", timestamp: "2026-01-01T00:00:00Z", cwd: "/Users/test/alpha", message: { role: "user", content: "hello parent" } }),
+        JSON.stringify({ type: "assistant", sessionId: PARENT, uuid: "a1", parentUuid: "u1", timestamp: "2026-01-01T00:00:01Z", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } }),
+      ].join("\n")
+    );
+
+    const subagentDir = join(projectDir, PARENT, "subagents");
+    const subagentFile = join(subagentDir, "agent-testsub.jsonl");
+    mkdirSync(subagentDir, { recursive: true });
+    writeFileSync(
+      subagentFile,
+      [
+        JSON.stringify({ type: "user", sessionId: PARENT, uuid: "su1", timestamp: "2026-01-01T00:00:05Z", cwd: "/Users/test/beta", message: { role: "user", content: "do subtask" } }),
+        JSON.stringify({ type: "assistant", sessionId: PARENT, uuid: "sa1", parentUuid: "su1", timestamp: "2026-01-01T00:00:06Z", message: { role: "assistant", content: [{ type: "text", text: "subtask done" }] } }),
+      ].join("\n")
+    );
+    return { parentFile, subagentFile };
+  }
+
+  test("ingest re-homes a subagent to its parent's project and records the link", () => {
+    const { parentFile, subagentFile } = writeParentAndSubagent();
+    ingestSessions([parentFile, subagentFile], db);
+
+    const parent = db.query("SELECT project_id FROM sessions WHERE id = ?").get(PARENT) as { project_id: string };
+    const sub = db.query("SELECT project_id, parent_session_id, is_subagent FROM sessions WHERE id = ?").get("agent-testsub") as
+      | { project_id: string; parent_session_id: string; is_subagent: number }
+      | null;
+
+    expect(parent.project_id).toBe("alpha");
+    expect(sub?.is_subagent).toBe(1);
+    expect(sub?.parent_session_id).toBe(PARENT); // link back to originating session
+    expect(sub?.project_id).toBe("alpha"); // re-homed from its own cwd ("beta")
+  });
+
+  test("project session_count reflects the re-homed subagent", () => {
+    const { parentFile, subagentFile } = writeParentAndSubagent();
+    ingestSessions([parentFile, subagentFile], db);
+
+    const alpha = db.query("SELECT session_count FROM projects WHERE id = ?").get("alpha") as { session_count: number };
+    const beta = db.query("SELECT session_count FROM projects WHERE id = ?").get("beta") as { session_count: number } | null;
+    expect(alpha.session_count).toBe(2); // parent + re-homed subagent
+    expect(beta?.session_count ?? 0).toBe(0); // subagent no longer counted here
+  });
+
+  test("backfills parent_session_id from the file path when the column is empty", () => {
+    const { parentFile, subagentFile } = writeParentAndSubagent();
+    ingestSessions([parentFile, subagentFile], db);
+    // Simulate a legacy row ingested before the parser recorded the link.
+    db.query("UPDATE sessions SET parent_session_id = NULL, project_id = 'beta' WHERE id = 'agent-testsub'").run();
+
+    relinkSubagents(db);
+
+    const sub = db.query("SELECT project_id, parent_session_id FROM sessions WHERE id = 'agent-testsub'").get() as {
+      project_id: string;
+      parent_session_id: string;
+    };
+    expect(sub.parent_session_id).toBe(PARENT);
+    expect(sub.project_id).toBe("alpha");
+  });
+
+  test("is idempotent", () => {
+    const { parentFile, subagentFile } = writeParentAndSubagent();
+    ingestSessions([parentFile, subagentFile], db);
+    relinkSubagents(db);
+    relinkSubagents(db);
+    const sub = db.query("SELECT project_id, parent_session_id FROM sessions WHERE id = 'agent-testsub'").get() as {
+      project_id: string;
+      parent_session_id: string;
+    };
+    expect(sub.parent_session_id).toBe(PARENT);
+    expect(sub.project_id).toBe("alpha");
+  });
+
+  test("leaves a subagent alone when its parent is not ingested", () => {
+    const projectDir = join(tempDir, "-Users-test-alpha");
+    const subagentDir = join(projectDir, PARENT, "subagents");
+    const subagentFile = join(subagentDir, "agent-orphan.jsonl");
+    mkdirSync(subagentDir, { recursive: true });
+    writeFileSync(
+      subagentFile,
+      [
+        JSON.stringify({ type: "user", sessionId: PARENT, uuid: "o1", timestamp: "2026-01-01T00:00:05Z", cwd: "/Users/test/beta", message: { role: "user", content: "orphan subtask" } }),
+        JSON.stringify({ type: "assistant", sessionId: PARENT, uuid: "o2", parentUuid: "o1", timestamp: "2026-01-01T00:00:06Z", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }),
+      ].join("\n")
+    );
+    ingestSessions([subagentFile], db); // parent never ingested
+
+    const sub = db.query("SELECT project_id, parent_session_id FROM sessions WHERE id = 'agent-orphan'").get() as {
+      project_id: string;
+      parent_session_id: string;
+    };
+    // Link is still recorded (from the file), but project stays as-is (parent unknown).
+    expect(sub.parent_session_id).toBe(PARENT);
+    expect(sub.project_id).toBe("beta");
   });
 });

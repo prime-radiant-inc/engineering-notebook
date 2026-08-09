@@ -52,7 +52,7 @@ export function renderProjectIndex(db: Database, selectedProject?: string, exclu
   for (const p of projects) {
     const isSelected = p.id === selectedProject;
     const lastActive = p.last_session_at ? formatDateShort(p.last_session_at.slice(0, 10)) : "No sessions";
-    html += `<a class="index-item${isSelected ? " selected" : ""}" href="/projects/${encodeURIComponent(p.id)}" hx-get="/api/projects/timeline?project=${encodeURIComponent(p.id)}" hx-target="#panel-entries" hx-push-url="/projects/${encodeURIComponent(p.id)}">`;
+    html += `<a class="index-item${isSelected ? " selected" : ""}" href="/projects/${encodeURIComponent(p.id)}" hx-get="/hx/projects/timeline?project=${encodeURIComponent(p.id)}" hx-target="#panel-entries" hx-push-url="/projects/${encodeURIComponent(p.id)}">`;
     html += `<div class="index-item-title">${escapeHtml(p.display_name || p.id)}</div>`;
     html += `<div class="index-item-sub">Last active ${escapeHtml(lastActive)}</div>`;
     html += `</a>`;
@@ -65,7 +65,7 @@ export function renderEntryCard(entry: ProjectEntryRow, projectId: string, isSel
   const sessionIds: string[] = JSON.parse(entry.session_ids || "[]");
   const topics: string[] = JSON.parse(entry.topics || "[]");
 
-  let html = `<a id="entry-${entry.id}" class="entry-card${isSelected ? " selected" : ""}" href="/projects/${encodeURIComponent(projectId)}/${entry.id}" hx-get="/api/journal/conversation?entry_id=${entry.id}" hx-target="#panel-detail">`;
+  let html = `<a id="entry-${entry.id}" class="entry-card${isSelected ? " selected" : ""}" href="/projects/${encodeURIComponent(projectId)}/${entry.id}" hx-get="/hx/journal/conversation?entry_id=${entry.id}" hx-target="#panel-detail">`;
   html += `<div class="entry-label">${formatDateShort(entry.date)}</div>`;
   if (entry.headline) {
     html += `<div class="entry-headline">${escapeHtml(entry.headline)}</div>`;
@@ -93,7 +93,7 @@ export function renderEntryCard(entry: ProjectEntryRow, projectId: string, isSel
 
 /** Render a suspense placeholder for an unsummarized date group */
 function renderUnsummarizedPlaceholder(projectId: string, date: string, sessionCount: number): string {
-  return `<div class="entry-card entry-card-pending" hx-get="/api/projects/summarize?project=${encodeURIComponent(projectId)}&date=${encodeURIComponent(date)}" hx-trigger="revealed" hx-swap="outerHTML" hx-request='{"timeout": 120000}'>
+  return `<div class="entry-card entry-card-pending" hx-get="/hx/projects/summarize?project=${encodeURIComponent(projectId)}&date=${encodeURIComponent(date)}" hx-trigger="revealed" hx-swap="outerHTML" hx-request='{"timeout": 120000}'>
     <div class="entry-label">${formatDateShort(date)}</div>
     <div class="entry-summary" style="color: var(--text-ghost); font-style: italic;">Generating summary\u2026 (${sessionCount} session${sessionCount !== 1 ? "s" : ""})</div>
   </div>`;

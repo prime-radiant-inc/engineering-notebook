@@ -429,6 +429,20 @@ export async function summarizeGroup(
   const parsed = parseSummaryResponse(responseText);
 
   upsertJournalEntry(db, group, parsed);
+
+  // Give each summarized session a Desktop-style title if it doesn't already
+  // have one (Desktop/user titles and existing generated ones are left alone).
+  const { titleSession } = await import("./titles");
+  for (const sid of group.sessionIds) {
+    try {
+      const row = db.query("SELECT title, COALESCE(is_subagent, 0) AS sub FROM sessions WHERE id = ?").get(sid) as
+        | { title: string | null; sub: number } | null;
+      if (row && !row.title && !row.sub) await titleSession(db, sid);
+    } catch {
+      // title generation is best-effort; never fail a summary over it
+    }
+  }
+
   return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
 }
 
@@ -446,6 +460,15 @@ export async function summarizeAll(
   let skipped = 0;
   const skipReasons: string[] = [];
   const errors: string[] = [];
+
+  // Apply any Claude Desktop titles up front so summarization only LLM-generates
+  // titles for sessions that genuinely lack one.
+  try {
+    const { applyDesktopTitles } = await import("./titles");
+    applyDesktopTitles(db);
+  } catch {
+    // no Desktop data / reader unavailable — fine, we'll generate as needed
+  }
 
   if (groups.length > 0) {
     const authIssue = await getClaudeAuthIssue();
