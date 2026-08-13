@@ -43,8 +43,13 @@ switch (command) {
 
     const result = ingestSessions(files, db, force);
     console.log(
-      `Ingested: ${result.ingested}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
+      `Ingested: ${result.ingested}, Re-ingested: ${result.reingested}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
     );
+    if (result.invalidatedJournals > 0) {
+      console.log(
+        `Invalidated ${result.invalidatedJournals} stale journal entr${result.invalidatedJournals === 1 ? "y" : "ies"} — re-run \`summarize\` to regenerate.`
+      );
+    }
     if (result.errors.length > 0) {
       for (const err of result.errors.slice(0, 10)) {
         console.error(`  ${err}`);
@@ -62,6 +67,87 @@ switch (command) {
     const projectIdx = process.argv.indexOf("--project");
     const filterProject = projectIdx !== -1 ? process.argv[projectIdx + 1] : undefined;
     const all = process.argv.includes("--all");
+    const why = process.argv.includes("--why");
+
+    if (why) {
+      if (!filterDate || !filterProject) {
+        console.error("Usage: engineering-notebook summarize --why --date <date> --project <project>");
+        closeDb();
+        process.exit(1);
+      }
+
+      // First: try to load and render a previously-recorded recursion tree
+      // for this entry. If a recursive run produced this summary, we have
+      // its full action trace and fragments stored in the DB.
+      const entryRow = db
+        .query<{ id: number; headline: string; summary: string; topics: string; open_questions: string; model_used: string }, [string, string]>(
+          "SELECT id, headline, summary, topics, open_questions, model_used FROM journal_entries WHERE date = ? AND project_id = ?"
+        )
+        .get(filterDate, filterProject);
+      if (entryRow) {
+        const { loadInvocationTree, renderInvocationTree } = await import(
+          "./recursive-summarize"
+        );
+        const tree = loadInvocationTree(db, entryRow.id);
+        if (tree) {
+          const rule = "-".repeat(60);
+          console.log(`# Audit: ${filterProject} (${filterDate})`);
+          console.log(`# Source: stored recursion tree`);
+          console.log(`# Model: ${entryRow.model_used}\n`);
+          console.log(`## Recursion tree\n${rule}`);
+          console.log(renderInvocationTree(tree));
+          console.log(rule);
+          console.log(`\n## Final journal entry`);
+          if (entryRow.headline === "") {
+            console.log(`SKIPPED: ${entryRow.summary}`);
+          } else {
+            console.log(`HEADLINE: ${entryRow.headline}`);
+            console.log(`SUMMARY: ${entryRow.summary}`);
+            console.log(`TOPICS: ${entryRow.topics}`);
+            console.log(`OPEN_QUESTIONS: ${entryRow.open_questions}`);
+          }
+          closeDb();
+          break;
+        }
+        // Entry exists but no tree (e.g. one-shot path or older runs).
+        // Fall through to the live re-run path below.
+      }
+
+      // Fallback: live re-run via explainGroup. Only works on unsummarized
+      // groups (or after deleting the stored entry).
+      const { groupSessionsByDateAndProject, explainGroup } = await import("./summarize");
+      const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, config.day_start_hour);
+      if (groups.length === 0) {
+        console.error(`No unsummarized group found for date=${filterDate} project=${filterProject}.`);
+        console.error("Note: live --why operates on unsummarized groups. The stored entry exists but has no recorded recursion tree (likely produced by the one-shot path). To re-audit, delete its journal_entries row first.");
+        closeDb();
+        process.exit(1);
+      }
+      const target = groups[0]!;
+      const explained = await explainGroup(target, config);
+      const rule = "-".repeat(60);
+      console.log(`# Audit: ${target.projectName} (${target.date})`);
+      console.log(`# Source: live re-run via explainGroup`);
+      console.log(`# Sessions: ${target.sessionIds.length}, conversation chunks: ${target.conversations.length}`);
+      console.log(`# Model: ${explained.modelUsed}\n`);
+      if (explained.requestBody) {
+        console.log(`## Request body sent\n${rule}\n${JSON.stringify(explained.requestBody, null, 2)}\n${rule}\n`);
+      } else {
+        console.log(`## Prompt sent\n${rule}\n${explained.prompt}\n${rule}\n`);
+      }
+      console.log(`## Raw response\n${rule}\n${explained.rawResponse}\n${rule}\n`);
+      console.log(`## Parsed`);
+      if (explained.parsed.skipped) {
+        console.log(`SKIPPED: ${explained.parsed.skipReason}`);
+      } else {
+        console.log(`HEADLINE: ${explained.parsed.headline}`);
+        console.log(`SUMMARY: ${explained.parsed.summary}`);
+        console.log(`TOPICS: ${JSON.stringify(explained.parsed.topics)}`);
+        console.log(`OPEN_QUESTIONS: ${JSON.stringify(explained.parsed.openQuestions)}`);
+      }
+      closeDb();
+      break;
+    }
 
     if (!filterDate && !filterProject && !all) {
       const { groupSessionsByDateAndProject } = await import("./summarize");
@@ -73,21 +159,160 @@ switch (command) {
     }
 
     const { summarizeAll } = await import("./summarize");
-    const result = await summarizeAll(db, filterDate, filterProject, (done, total, group) => {
-      console.log(`[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`);
-    }, config.day_start_hour, config.summary_instructions);
-
-    console.log(`Summarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`);
-    if (result.skipped > 0) {
-      for (const reason of result.skipReasons) {
-        console.log(`  \u2298 ${reason}`);
+    const result = await summarizeAll(
+      db,
+      filterDate,
+      filterProject,
+      (done, total, group) => {
+        console.log(
+          `[${done + 1}/${total}] Summarizing ${group.projectName} (${group.date})...`
+        );
+      },
+      config.day_start_hour,
+      config,
+      (done, total, outcome) => {
+        const tag = `[${done}/${total}]`;
+        const where = `${outcome.group.projectName} (${outcome.group.date})`;
+        if (outcome.kind === "summarized") {
+          console.log(`${tag} \u2713 ${where}`);
+        } else if (outcome.kind === "skipped") {
+          console.log(`${tag} \u2298 ${where}: ${outcome.reason}`);
+        } else {
+          console.error(`${tag} \u2717 ${where}: ${outcome.error}`);
+        }
       }
-    }
+    );
+
+    console.log(
+      `\nSummarized: ${result.summarized}, Skipped: ${result.skipped}, Errors: ${result.errors.length}`
+    );
     if (result.errors.length > 0) {
+      console.error("\nErrors:");
       for (const err of result.errors.slice(0, 10)) {
         console.error(`  ${err}`);
       }
     }
+    closeDb();
+    break;
+  }
+  case "skipped": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+
+    const limitIdx = process.argv.indexOf("--limit");
+    const limit = limitIdx !== -1 ? parseInt(process.argv[limitIdx + 1] ?? "20", 10) : 20;
+    const sinceIdx = process.argv.indexOf("--since");
+    const sinceDate = sinceIdx !== -1 ? process.argv[sinceIdx + 1] : undefined;
+    const projectIdx = process.argv.indexOf("--project");
+    const filterProject = projectIdx !== -1 ? process.argv[projectIdx + 1] : undefined;
+
+    const conditions: string[] = ["headline = ''"];
+    const params: (string | number)[] = [];
+    if (sinceDate) {
+      conditions.push("date >= ?");
+      params.push(sinceDate);
+    }
+    if (filterProject) {
+      conditions.push("project_id = ?");
+      params.push(filterProject);
+    }
+    const where = conditions.join(" AND ");
+
+    const rows = db
+      .query<
+        { date: string; project_id: string; summary: string; generated_at: string },
+        (string | number)[]
+      >(
+        `SELECT date, project_id, summary, generated_at FROM journal_entries
+         WHERE ${where}
+         ORDER BY date DESC, project_id ASC
+         LIMIT ?`
+      )
+      .all(...params, limit);
+
+    if (rows.length === 0) {
+      console.log("No skipped entries match the filters.");
+      closeDb();
+      break;
+    }
+
+    console.log(`# Skipped journal entries (${rows.length} shown)`);
+    console.log(`# Use --since YYYY-MM-DD --project NAME --limit N to filter.`);
+    console.log(`# To re-evaluate one: delete from journal_entries WHERE date=X AND project_id=Y; then summarize --date X --project Y`);
+    console.log();
+    for (const row of rows) {
+      console.log(`## ${row.date} — ${row.project_id}`);
+      console.log(`generated: ${row.generated_at}`);
+      console.log(row.summary);
+      console.log();
+    }
+    closeDb();
+    break;
+  }
+  case "rollup": {
+    const config = loadConfig();
+    const db = initDb(config.db_path);
+
+    const periodFlag = process.argv.indexOf("--period");
+    const period = periodFlag !== -1 ? process.argv[periodFlag + 1] : "week";
+    if (period !== "week") {
+      console.error(`Only --period week is supported in this version (got: ${period}).`);
+      closeDb();
+      process.exit(1);
+    }
+
+    const projectIdx = process.argv.indexOf("--project");
+    const filterProject = projectIdx !== -1 ? process.argv[projectIdx + 1] : undefined;
+    const weekIdx = process.argv.indexOf("--week");
+    const filterWeek = weekIdx !== -1 ? process.argv[weekIdx + 1] : undefined;
+    const all = process.argv.includes("--all");
+
+    const { findUnrolledWeeks, rollupWeek, weekStart } = await import("./rollup");
+
+    let targets = findUnrolledWeeks(db);
+    if (filterProject) targets = targets.filter((t) => t.projectId === filterProject);
+    if (filterWeek) {
+      const monday = weekStart(filterWeek);
+      targets = targets.filter((t) => t.weekMonday === monday);
+    }
+
+    if (targets.length === 0) {
+      console.log("No unrolled (week, project) tuples match the filters.");
+      closeDb();
+      break;
+    }
+
+    if (!all && !filterProject && !filterWeek) {
+      console.log(`Found ${targets.length} unrolled (week, project) tuple(s).`);
+      console.log("Use --all to roll up everything, or --project/--week to filter.");
+      closeDb();
+      break;
+    }
+
+    let rolled = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i]!;
+      const tag = `[${i + 1}/${targets.length}]`;
+      console.log(`${tag} Rolling up ${t.projectName} (week of ${t.weekMonday}, ${t.entryCount} daily entries)...`);
+      try {
+        const result = await rollupWeek(db, t.projectId, t.weekMonday, config);
+        if (result.skipped) {
+          skipped++;
+          console.log(`${tag} ⊘ ${t.projectName} (week of ${t.weekMonday}): ${result.skipReason}`);
+        } else {
+          rolled++;
+          console.log(`${tag} ✓ ${t.projectName} (week of ${t.weekMonday}): ${result.headline}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${t.projectName} week of ${t.weekMonday}: ${msg}`);
+        console.error(`${tag} ✗ ${t.projectName} (week of ${t.weekMonday}): ${msg}`);
+      }
+    }
+
+    console.log(`\nRolled up: ${rolled}, Skipped: ${skipped}, Errors: ${errors.length}`);
     closeDb();
     break;
   }
@@ -116,6 +341,6 @@ switch (command) {
     console.log("TODO: config");
     break;
   default:
-    console.log("Usage: notebook <ingest|summarize|serve|config>");
+    console.log("Usage: notebook <ingest|summarize|skipped|rollup|serve|config>");
     process.exit(1);
 }

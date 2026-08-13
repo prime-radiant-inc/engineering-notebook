@@ -1,6 +1,36 @@
 import { Database } from "bun:sqlite";
+import type { Config, SummaryProvider } from "./config";
 
-const SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
+export const CLAUDE_SUMMARIZE_MODEL = "claude-haiku-4-5-20251001";
+
+type SummarizerConfig = Pick<
+  Config,
+  | "summary_provider"
+  | "summary_base_url"
+  | "summary_model"
+  | "summary_extras"
+  | "summary_instructions"
+>;
+
+export type ResolvedSummarizerSettings = {
+  provider: SummaryProvider;
+  baseUrl: string;
+  model: string;
+  extras: Record<string, unknown>;
+};
+
+export function resolveSummarizerSettings(
+  config?: Partial<SummarizerConfig>
+): ResolvedSummarizerSettings {
+  const provider: SummaryProvider =
+    config?.summary_provider === "openai-compat" ? "openai-compat" : "claude";
+  return {
+    provider,
+    baseUrl: config?.summary_base_url?.trim() ?? "",
+    model: config?.summary_model?.trim() ?? "",
+    extras: config?.summary_extras ?? {},
+  };
+}
 
 async function readStream(stream: ReadableStream<Uint8Array> | null): Promise<string> {
   if (!stream) return "";
@@ -75,6 +105,9 @@ export type SessionGroup = {
   projectName: string;
   sessionIds: string[];
   conversations: string[];
+  /** Per-entry source session ID, parallel to `conversations`. A single
+   *  session can appear in multiple entries when its messages span midnight. */
+  conversationSources: string[];
 };
 
 type ConvoRow = {
@@ -125,8 +158,18 @@ export function splitConversationByDay(
 }
 
 /** Group unsummarized sessions by date and project.
- *  Splits conversations by logical day boundary so a session spanning midnight
- *  contributes messages to the correct date's journal entry. */
+ *
+ *  Each session is treated as an atomic unit and attributed to its
+ *  `started_at` logical date. A session that begins late one night and
+ *  continues past midnight contributes its full content to the start date,
+ *  not split across days.
+ *
+ *  Earlier versions split sessions at midnight using per-message timestamps,
+ *  but in practice that produced thin tail slivers on the next day (a few
+ *  morning messages) that the LLM consistently rejected as "no engineering
+ *  work" — losing the connection to the substantive work that came earlier.
+ *  Keeping sessions whole gives the journal entry for the start date access
+ *  to the entire arc. */
 export function groupSessionsByDateAndProject(
   db: Database,
   filterDate?: string,
@@ -171,56 +214,33 @@ export function groupSessionsByDateAndProject(
     summarizedRows.map((r) => `${r.date}|${r.project_id}`)
   );
 
-  // Group by (logical-date, project)
+  // Group by (logical-start-date, project). Each session is attributed
+  // atomically to its started_at logical date — we no longer split a
+  // session's content across days even if its messages span midnight.
+  // The session's started_at column is what `row.date` already holds (it's
+  // `date(s.started_at)` from the SELECT), so we only need to apply the
+  // dayStartHour cutoff for late-night starts.
   const groups = new Map<string, SessionGroup>();
 
   for (const row of rows) {
-    const dayChunks = splitConversationByDay(
-      row.conversation_markdown,
-      dayStartHour
-    );
-
-    if (dayChunks) {
-      // New-format timestamps: split across logical dates
-      for (const [day, chunk] of dayChunks) {
-        const key = `${day}|${row.project_id}`;
-        if (!groups.has(key)) {
-          groups.set(key, {
-            date: day,
-            projectId: row.project_id,
-            projectName: row.display_name,
-            sessionIds: [],
-            conversations: [],
-          });
-        }
-        const group = groups.get(key)!;
-        if (!group.sessionIds.includes(row.session_id)) {
-          group.sessionIds.push(row.session_id);
-        }
-        group.conversations.push(chunk);
-      }
-    } else {
-      // Old-format timestamps: fall back to session's started_at date
-      const fallbackDay = logicalDate(
-        row.date + " 12:00",
-        dayStartHour
-      );
-      const key = `${fallbackDay}|${row.project_id}`;
-      if (!groups.has(key)) {
-        groups.set(key, {
-          date: fallbackDay,
-          projectId: row.project_id,
-          projectName: row.display_name,
-          sessionIds: [],
-          conversations: [],
-        });
-      }
-      const group = groups.get(key)!;
-      if (!group.sessionIds.includes(row.session_id)) {
-        group.sessionIds.push(row.session_id);
-      }
-      group.conversations.push(row.conversation_markdown);
+    const sessionDate = logicalDate(row.date + " 12:00", dayStartHour);
+    const key = `${sessionDate}|${row.project_id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        date: sessionDate,
+        projectId: row.project_id,
+        projectName: row.display_name,
+        sessionIds: [],
+        conversations: [],
+        conversationSources: [],
+      });
     }
+    const group = groups.get(key)!;
+    if (!group.sessionIds.includes(row.session_id)) {
+      group.sessionIds.push(row.session_id);
+    }
+    group.conversations.push(row.conversation_markdown);
+    group.conversationSources.push(row.session_id);
   }
 
   // Filter out already-summarized combos
@@ -337,7 +357,8 @@ export function parseSummaryResponse(response: string): SummaryResult {
 export function upsertJournalEntry(
   db: Database,
   group: SessionGroup,
-  result: SummaryResult
+  result: SummaryResult,
+  modelUsed: string = CLAUDE_SUMMARIZE_MODEL
 ): void {
   if (result.skipped) {
     db.prepare(
@@ -354,7 +375,7 @@ export function upsertJournalEntry(
       group.projectId,
       JSON.stringify(group.sessionIds),
       result.skipReason || "No reason given",
-      SUMMARIZE_MODEL
+      modelUsed
     );
     return;
   }
@@ -380,28 +401,20 @@ export function upsertJournalEntry(
     result.summary,
     JSON.stringify(result.topics),
     JSON.stringify(result.openQuestions),
-    SUMMARIZE_MODEL
+    modelUsed
   );
 }
 
-/** Run LLM summarization using Claude Agent SDK */
-export async function summarizeGroup(
-  group: SessionGroup,
-  db: Database,
-  summaryInstructions?: string
-): Promise<{ skipped: boolean; skipReason?: string }> {
+export async function summarizeWithClaude(prompt: string): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
-  const prompt = buildSummaryPrompt(group, summaryInstructions);
-
   let responseText = "";
-
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
   const result = query({
     prompt,
     options: {
-      model: SUMMARIZE_MODEL,
+      model: CLAUDE_SUMMARIZE_MODEL,
       maxTurns: 1,
       tools: [],
       permissionMode: "bypassPermissions",
@@ -422,15 +435,206 @@ export async function summarizeGroup(
     }
   }
 
-  if (!responseText.trim()) {
+  return responseText;
+}
+
+/** Build the request body sent to an OpenAI-compatible /v1/chat/completions endpoint.
+ *  Exported so audit tools (--why) can render the exact body that will be sent. */
+export function buildOpenAICompatBody(
+  prompt: string,
+  settings: ResolvedSummarizerSettings
+): Record<string, unknown> {
+  return {
+    ...settings.extras,
+    model: settings.model,
+    messages: [{ role: "user", content: prompt }],
+    stream: false,
+  };
+}
+
+export async function summarizeWithOpenAICompat(
+  prompt: string,
+  settings: ResolvedSummarizerSettings
+): Promise<string> {
+  if (!settings.baseUrl) {
+    throw new Error(
+      "summary_base_url is empty — set it in config.json when summary_provider is \"openai-compat\"."
+    );
+  }
+  if (!settings.model) {
+    throw new Error(
+      "summary_model is empty — set it in config.json when summary_provider is \"openai-compat\"."
+    );
+  }
+  const base = settings.baseUrl.replace(/\/+$/, "");
+  const body = buildOpenAICompatBody(prompt, settings);
+  const res = await fetch(`${base}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errBody = (await res.text()).trim();
+    const details = errBody ? `: ${errBody}` : "";
+    throw new Error(
+      `OpenAI-compat request to ${base} failed (${res.status} ${res.statusText})${details}`
+    );
+  }
+
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+/** Run the LLM end-to-end without writing to the database.
+ *  Returns the prompt, raw response, parsed result, and model name.
+ *  Intended for audit/debugging tools like --why. */
+export async function explainGroup(
+  group: SessionGroup,
+  config?: Partial<SummarizerConfig>
+): Promise<{
+  prompt: string;
+  rawResponse: string;
+  parsed: SummaryResult;
+  modelUsed: string;
+  requestBody?: Record<string, unknown>;
+}> {
+  const prompt = buildSummaryPrompt(group, config?.summary_instructions);
+  const settings = resolveSummarizerSettings(config);
+  const modelUsed =
+    settings.provider === "openai-compat" ? settings.model : CLAUDE_SUMMARIZE_MODEL;
+
+  let rawResponse: string;
+  let requestBody: Record<string, unknown> | undefined;
+  if (settings.provider === "openai-compat") {
+    requestBody = buildOpenAICompatBody(prompt, settings);
+    rawResponse = await summarizeWithOpenAICompat(prompt, settings);
+  } else {
+    rawResponse = await summarizeWithClaude(prompt);
+  }
+
+  if (!rawResponse.trim()) {
     throw new Error("Empty response from LLM");
   }
 
-  const parsed = parseSummaryResponse(responseText);
-
-  upsertJournalEntry(db, group, parsed);
-  return { skipped: parsed.skipped, skipReason: parsed.skipped ? parsed.skipReason : undefined };
+  const parsed = parseSummaryResponse(rawResponse);
+  return { prompt, rawResponse, parsed, modelUsed, requestBody };
 }
+
+export async function summarizeGroup(
+  group: SessionGroup,
+  db: Database,
+  config?: Partial<SummarizerConfig>
+): Promise<{ skipped: boolean; skipReason?: string }> {
+  const settings = resolveSummarizerSettings(config);
+
+  const transcript = group.conversations.join("\n\n---\n\n");
+
+  // Provider-agnostic routing:
+  //   - If transcript fits in the provider's one-shot threshold: one-shot
+  //     sandwich-format summarization (fastest, validated quality).
+  //   - Otherwise: recursive RLM-style orchestrator that subdivides the
+  //     transcript with sandboxed scopes and mandatory complete coverage.
+  //
+  // Per-provider one-shot thresholds:
+  //   - claude: very large (200K+ tokens for Sonnet, 1M for Opus 4.7)
+  //   - openai-compat: depends on backing model; Qwen3.6 honors up to 161K
+  //     prompt tokens (~500KB chars). Conservative default 800K chars.
+  const oneShotThreshold = oneShotThresholdForProvider(settings.provider);
+
+  if (transcript.length <= oneShotThreshold) {
+    if (settings.provider === "openai-compat") {
+      const { summarizeOneShot } = await import("./oneshot-summarize");
+      const oneShot = await summarizeOneShot(
+        group.projectName,
+        group.date,
+        transcript,
+        config
+      );
+      upsertJournalEntry(db, group, oneShot.parsed, oneShot.modelUsed);
+      return {
+        skipped: oneShot.parsed.skipped,
+        skipReason: oneShot.parsed.skipped ? oneShot.parsed.skipReason : undefined,
+      };
+    }
+    // Claude provider one-shot path stays via explainGroup (uses the Agent
+    // SDK's prompt envelope which differs from the OpenAI HTTP shape).
+    const { parsed, modelUsed } = await explainGroup(group, config);
+    upsertJournalEntry(db, group, parsed, modelUsed);
+    return {
+      skipped: parsed.skipped,
+      skipReason: parsed.skipped ? parsed.skipReason : undefined,
+    };
+  }
+
+  // Above-threshold: recursive RLM-style orchestrator. Provider-agnostic;
+  // uses the same provider routing internally (claude or openai-compat).
+  // Build sessionRanges so the orchestrator can attribute each fragment
+  // back to its source session in journal_fragments.
+  const sessionRanges: Array<{ sessionId: string; start: number; end: number }> = [];
+  let cursor = 0;
+  const separator = "\n\n---\n\n";
+  for (let i = 0; i < group.conversations.length; i++) {
+    const md = group.conversations[i]!;
+    const sid = group.conversationSources[i]!;
+    sessionRanges.push({ sessionId: sid, start: cursor, end: cursor + md.length });
+    cursor += md.length + (i < group.conversations.length - 1 ? separator.length : 0);
+  }
+
+  const { summarizeRecursive, persistInvocationTree } = await import(
+    "./recursive-summarize"
+  );
+  const recursive = await summarizeRecursive(
+    group.projectName,
+    group.date,
+    transcript,
+    config,
+    {
+      onProgress: (msg) => console.log(msg),
+      sessionRanges,
+    }
+  );
+  upsertJournalEntry(db, group, recursive.parsed, recursive.modelUsed);
+
+  // Persist the recursion tree so --why can render it later.
+  const entryRow = db
+    .query<{ id: number }, [string, string]>(
+      "SELECT id FROM journal_entries WHERE date = ? AND project_id = ?"
+    )
+    .get(group.date, group.projectId);
+  if (entryRow) {
+    persistInvocationTree(db, entryRow.id, recursive.rootInvocation);
+  }
+
+  return {
+    skipped: recursive.parsed.skipped,
+    skipReason: recursive.parsed.skipped ? recursive.parsed.skipReason : undefined,
+  };
+}
+
+/** Per-provider one-shot threshold (chars). Above this, the recursive
+ *  orchestrator is used to subdivide the transcript. */
+function oneShotThresholdForProvider(provider: SummaryProvider): number {
+  switch (provider) {
+    case "claude":
+      // Claude Sonnet 4.x has 200K-token context; Opus 4.7 has 1M. Either
+      // can handle multi-megabyte transcripts in one shot. We set a high
+      // ceiling to avoid surprises but in practice this rarely triggers
+      // recursive for the Claude provider.
+      return 4_000_000;
+    case "openai-compat":
+      // Validated empirically up to 492KB / 161K tokens on Qwen3.6 with
+      // 256K context (2026-05-13). Conservative ceiling leaves headroom.
+      return 800_000;
+  }
+}
+
+export type SummarizeOutcome =
+  | { kind: "summarized"; group: SessionGroup }
+  | { kind: "skipped"; group: SessionGroup; reason: string }
+  | { kind: "error"; group: SessionGroup; error: string };
 
 /** Summarize all unsummarized groups */
 export async function summarizeAll(
@@ -439,15 +643,17 @@ export async function summarizeAll(
   filterProject?: string,
   onProgress?: (done: number, total: number, group: SessionGroup) => void,
   dayStartHour: number = 5,
-  summaryInstructions?: string
+  config?: Partial<SummarizerConfig>,
+  onComplete?: (done: number, total: number, outcome: SummarizeOutcome) => void
 ): Promise<{ summarized: number; skipped: number; skipReasons: string[]; errors: string[] }> {
   const groups = groupSessionsByDateAndProject(db, filterDate, filterProject, dayStartHour);
   let summarized = 0;
   let skipped = 0;
   const skipReasons: string[] = [];
   const errors: string[] = [];
+  const settings = resolveSummarizerSettings(config);
 
-  if (groups.length > 0) {
+  if (groups.length > 0 && settings.provider === "claude") {
     const authIssue = await getClaudeAuthIssue();
     if (authIssue) {
       errors.push(authIssue);
@@ -458,15 +664,31 @@ export async function summarizeAll(
   for (const group of groups) {
     try {
       onProgress?.(summarized + skipped, groups.length, group);
-      const result = await summarizeGroup(group, db, summaryInstructions);
+      const result = await summarizeGroup(group, db, config);
       if (result.skipped) {
         skipped++;
-        if (result.skipReason) skipReasons.push(result.skipReason);
+        const reason = result.skipReason || "no reason given";
+        skipReasons.push(`${group.projectName} (${group.date}): ${reason}`);
+        onComplete?.(summarized + skipped, groups.length, {
+          kind: "skipped",
+          group,
+          reason,
+        });
       } else {
         summarized++;
+        onComplete?.(summarized + skipped, groups.length, {
+          kind: "summarized",
+          group,
+        });
       }
     } catch (err) {
-      errors.push(`${group.date}/${group.projectId}: ${formatSummarizeError(err)}`);
+      const errorMsg = formatSummarizeError(err);
+      errors.push(`${group.date}/${group.projectId}: ${errorMsg}`);
+      onComplete?.(summarized + skipped, groups.length, {
+        kind: "error",
+        group,
+        error: errorMsg,
+      });
     }
   }
 

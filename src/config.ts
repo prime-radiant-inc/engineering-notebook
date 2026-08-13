@@ -9,6 +9,9 @@ export type RemoteSource = {
   enabled: boolean;
 };
 
+export const SUMMARY_PROVIDERS = ["claude", "openai-compat"] as const;
+export type SummaryProvider = (typeof SUMMARY_PROVIDERS)[number];
+
 export type Config = {
   sources: string[];
   exclude: string[];
@@ -16,6 +19,10 @@ export type Config = {
   port: number;
   day_start_hour: number;
   summary_instructions: string;
+  summary_provider: SummaryProvider;
+  summary_base_url: string;
+  summary_model: string;
+  summary_extras: Record<string, unknown>;
   remote_sources: RemoteSource[];
   auto_sync_interval: number;
 };
@@ -29,6 +36,10 @@ export function defaultConfig(): Config {
     port: 3000,
     day_start_hour: 5,
     summary_instructions: "",
+    summary_provider: "claude",
+    summary_base_url: "",
+    summary_model: "",
+    summary_extras: {},
     remote_sources: [],
     auto_sync_interval: 60,
   };
@@ -45,6 +56,17 @@ export function loadConfig(path?: string): Config {
   }
   const raw = readFileSync(configPath, "utf-8");
   const parsed = JSON.parse(raw) as Partial<Config>;
+
+  if (
+    parsed.summary_provider !== undefined &&
+    !SUMMARY_PROVIDERS.includes(parsed.summary_provider)
+  ) {
+    throw new Error(
+      `Invalid summary_provider "${parsed.summary_provider}" in ${configPath}. ` +
+        `Must be one of: ${SUMMARY_PROVIDERS.join(", ")}.`
+    );
+  }
+
   const config = { ...defaultConfig(), ...parsed };
 
   // Migrate older default source list to include Codex sessions.

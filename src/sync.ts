@@ -197,7 +197,7 @@ export class SyncManager {
         undefined,
         undefined,
         this.config.day_start_hour,
-        this.config.summary_instructions
+        this.config
       );
       this.status.lastSummarizeStats = {
         summarized: result.summarized,
@@ -217,7 +217,7 @@ export class SyncManager {
       this.db, date, projectId, this.config.day_start_hour
     );
     if (groups.length === 0) return null;
-    const result = await summarizeGroup(groups[0]!, this.db, this.config.summary_instructions);
+    const result = await summarizeGroup(groups[0]!, this.db, this.config);
     if (result.skipped) return null;
     const row = this.db.query(
       `SELECT id FROM journal_entries WHERE project_id = ? AND date = ?`

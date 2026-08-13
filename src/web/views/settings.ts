@@ -126,6 +126,33 @@ export function renderSettings(config: Config): string {
   html += `<textarea class="settings-input" name="summary_instructions" rows="4">${escapeHtml(config.summary_instructions)}</textarea>`;
   html += `</div>`;
 
+  // Summarizer provider
+  html += `<div class="settings-group">`;
+  html += `<div class="settings-label">Summarizer Provider</div>`;
+  html += `<div class="settings-help">Use Claude Code auth, or an OpenAI-compatible server (Ollama, vLLM, llama.cpp <code>llama-server</code>, LM Studio, etc.).</div>`;
+  html += `<select class="settings-input" name="summary_provider" style="width: 260px;">`;
+  html += `<option value="claude" ${config.summary_provider === "claude" ? "selected" : ""}>Claude (default)</option>`;
+  html += `<option value="openai-compat" ${config.summary_provider === "openai-compat" ? "selected" : ""}>OpenAI-compatible (Ollama, vLLM, etc.)</option>`;
+  html += `</select>`;
+  html += `</div>`;
+
+  // OpenAI-compat settings
+  html += `<div class="settings-group">`;
+  html += `<div class="settings-label">Summary Base URL</div>`;
+  html += `<div class="settings-help">Used when provider is OpenAI-compatible. The path <code>/v1/chat/completions</code> is appended automatically.</div>`;
+  html += `<input class="settings-input" type="text" name="summary_base_url" value="${escapeHtml(config.summary_base_url)}" placeholder="http://localhost:11434">`;
+  html += `</div>`;
+  html += `<div class="settings-group">`;
+  html += `<div class="settings-label">Summary Model</div>`;
+  html += `<div class="settings-help">Model name as known to your server. Run <code>curl &lt;base_url&gt;/v1/models</code> to list available names.</div>`;
+  html += `<input class="settings-input" type="text" name="summary_model" value="${escapeHtml(config.summary_model)}" placeholder="qwen3.6:latest">`;
+  html += `</div>`;
+  html += `<div class="settings-group">`;
+  html += `<div class="settings-label">Summary Extras (JSON)</div>`;
+  html += `<div class="settings-help">Extra fields merged into the request body. Use to enable server-specific options. Examples: <code>{"reasoning_effort": "none"}</code> for Ollama/OpenAI to suppress chain-of-thought; <code>{"chat_template_kwargs": {"enable_thinking": false}}</code> for vLLM/SGLang/llama.cpp; <code>{"temperature": 0.2}</code> for any server.</div>`;
+  html += `<textarea class="settings-input" name="summary_extras" rows="4" placeholder='{}'>${escapeHtml(JSON.stringify(config.summary_extras, null, 2))}</textarea>`;
+  html += `</div>`;
+
   // Day start hour
   html += `<div class="settings-group">`;
   html += `<div class="settings-label">Day Start Hour</div>`;

@@ -15,6 +15,7 @@ const group: SessionGroup = {
   projectName: "My Project",
   sessionIds: ["session-abc"],
   conversations: ["some transcript"],
+  conversationSources: ["session-abc"],
 };
 
 describe("upsertJournalEntry", () => {

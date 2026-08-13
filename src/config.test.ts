@@ -22,6 +22,29 @@ describe("config", () => {
     expect(config.exclude).toContain("-private-tmp*");
     expect(config.port).toBe(3000);
     expect(config.db_path).toContain("notebook.db");
+    expect(config.summary_provider).toBe("claude");
+    expect(config.summary_base_url).toBe("");
+    expect(config.summary_model).toBe("");
+    expect(config.summary_extras).toEqual({});
+  });
+
+  test("loadConfig rejects invalid summary_provider with a clear error", () => {
+    const configPath = join(tempDir, "bad-provider.json");
+    writeFileSync(configPath, JSON.stringify({ summary_provider: "ollama" }));
+    expect(() => loadConfig(configPath)).toThrow(/Invalid summary_provider/);
+  });
+
+  test("loadConfig accepts openai-compat provider with extras", () => {
+    const configPath = join(tempDir, "openai-compat.json");
+    writeFileSync(configPath, JSON.stringify({
+      summary_provider: "openai-compat",
+      summary_base_url: "http://localhost:11434",
+      summary_model: "qwen3.6:latest",
+      summary_extras: { reasoning_effort: "none", temperature: 0.2 },
+    }));
+    const loaded = loadConfig(configPath);
+    expect(loaded.summary_provider).toBe("openai-compat");
+    expect(loaded.summary_extras).toEqual({ reasoning_effort: "none", temperature: 0.2 });
   });
 
   test("loadConfig returns default when no file exists", () => {
@@ -38,6 +61,10 @@ describe("config", () => {
       port: 4000,
       day_start_hour: 5,
       summary_instructions: "",
+      summary_provider: "openai-compat",
+      summary_base_url: "http://localhost:11434",
+      summary_model: "qwen3.6:latest",
+      summary_extras: { reasoning_effort: "none" },
       remote_sources: [],
       auto_sync_interval: 60,
     };
