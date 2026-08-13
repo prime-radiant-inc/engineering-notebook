@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { scanSources, ingestSessions } from "./ingest";
 import { initDb, closeDb } from "./db";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, copyFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, copyFileSync, appendFileSync, utimesSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -112,7 +112,8 @@ describe("ingestSessions", () => {
     expect(first.errors.length).toBe(0);
 
     const second = ingestSessions([sessionFile], db, true);
-    expect(second.ingested).toBe(1);
+    expect(second.ingested).toBe(0);
+    expect(second.reingested).toBe(1);
     expect(second.skipped).toBe(0);
     expect(second.errors.length).toBe(0);
 
@@ -169,5 +170,78 @@ describe("ingestSessions", () => {
     expect(session?.project_path).toBe("/Users/peteror/Code/engineering-notebook");
     expect(session?.version).toBe("0.99.0-alpha.23");
     expect(session?.message_count).toBe(2);
+  });
+
+  test("re-ingests when source file has grown (claude/codex appends to existing session)", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.jsonl");
+    const projectDir = join(tempDir, "-Users-test-myapp");
+    mkdirSync(projectDir, { recursive: true });
+    const sessionFile = join(projectDir, "test-session-1.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    const first = ingestSessions([sessionFile], db);
+    expect(first.ingested).toBe(1);
+    const firstSnapshot = db.query("SELECT source_size, source_mtime FROM sessions").get() as { source_size: number; source_mtime: string };
+    expect(firstSnapshot.source_size).toBeGreaterThan(0);
+
+    // Append to simulate Claude/Codex continuing the session
+    const originalRaw = require("fs").readFileSync(fixturePath, "utf-8");
+    appendFileSync(sessionFile, originalRaw); // doubles the content
+
+    // Bump mtime to ensure detection even if the OS clock granularity coalesces the writes
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(sessionFile, future, future);
+
+    const second = ingestSessions([sessionFile], db);
+    expect(second.ingested).toBe(0);
+    expect(second.reingested).toBe(1);
+    expect(second.skipped).toBe(0);
+
+    const secondSnapshot = db.query("SELECT source_size FROM sessions").get() as { source_size: number };
+    expect(secondSnapshot.source_size).toBeGreaterThan(firstSnapshot.source_size);
+  });
+
+  test("skips unchanged files on repeated ingest (size and mtime both match)", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.jsonl");
+    const projectDir = join(tempDir, "-Users-test-myapp");
+    mkdirSync(projectDir, { recursive: true });
+    const sessionFile = join(projectDir, "test-session-1.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const result = ingestSessions([sessionFile], db);
+    expect(result.ingested).toBe(0);
+    expect(result.reingested).toBe(0);
+    expect(result.skipped).toBe(1);
+  });
+
+  test("re-ingesting invalidates journal entries for the affected (date, project)", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.jsonl");
+    const projectDir = join(tempDir, "-Users-test-myapp");
+    mkdirSync(projectDir, { recursive: true });
+    const sessionFile = join(projectDir, "test-session-1.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const session = db.query("SELECT id, project_id, date(started_at) as date FROM sessions").get() as { id: string; project_id: string; date: string };
+
+    // Plant a journal entry for that (date, project_id)
+    db.exec(`
+      INSERT INTO journal_entries (date, project_id, session_ids, headline, summary, generated_at, model_used)
+      VALUES ('${session.date}', '${session.project_id}', '["${session.id}"]', 'cached', 'cached summary', datetime('now'), 'test')
+    `);
+    const beforeCount = (db.query("SELECT COUNT(*) as n FROM journal_entries").get() as { n: number }).n;
+    expect(beforeCount).toBe(1);
+
+    // Modify the file and re-ingest
+    appendFileSync(sessionFile, require("fs").readFileSync(fixturePath, "utf-8"));
+    utimesSync(sessionFile, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
+
+    const result = ingestSessions([sessionFile], db);
+    expect(result.reingested).toBe(1);
+    expect(result.invalidatedJournals).toBe(1);
+
+    const afterCount = (db.query("SELECT COUNT(*) as n FROM journal_entries").get() as { n: number }).n;
+    expect(afterCount).toBe(0);
   });
 });
