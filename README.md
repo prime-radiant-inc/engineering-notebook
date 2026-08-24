@@ -85,7 +85,7 @@ engineering-notebook serve              # default port 3000
 engineering-notebook serve --port 8080  # custom port
 ```
 
-The server auto-syncs remote sources and re-ingests on a configurable interval (default: 60 seconds).
+The server auto-syncs remote sources and re-ingests on a configurable interval (default: every 60 minutes).
 
 ## Configuration
 
@@ -113,7 +113,7 @@ Config lives at `~/.config/engineering-notebook/config.json`:
 | `day_start_hour`       | Hour (0-23) when a "day" starts (for grouping late-night sessions with the previous day) | `5`                                            |
 | `summary_instructions` | Custom instructions appended to the LLM summarization prompt                             | `""`                                           |
 | `remote_sources`       | SSH remote sources to sync before ingesting                                              | `[]`                                           |
-| `auto_sync_interval`   | Seconds between auto-syncs when serving                                                  | `60`                                           |
+| `auto_sync_interval`   | Minutes between auto-syncs when serving (0 disables)                                     | `60`                                           |
 
 ### Remote Sources
 

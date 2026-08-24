@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { scanSources, ingestSessions } from "./ingest";
 import { initDb, closeDb } from "./db";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, copyFileSync } from "fs";
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -98,6 +98,51 @@ describe("ingestSessions", () => {
     const result = ingestSessions([sessionFile], db);
     expect(result.ingested).toBe(0);
     expect(result.skipped).toBe(1);
+  });
+
+  test("re-reads a session whose file has grown, and replaces it", () => {
+    const fixturePath = join(import.meta.dir, "../tests/fixtures/test-session-1.jsonl");
+    const projectDir = join(tempDir, "-Users-test-myapp");
+    mkdirSync(projectDir, { recursive: true });
+    const sessionFile = join(projectDir, "test-session-1.jsonl");
+    copyFileSync(fixturePath, sessionFile);
+
+    ingestSessions([sessionFile], db);
+    const before = db
+      .query("SELECT message_count FROM sessions WHERE source_path = ?")
+      .get(sessionFile) as { message_count: number };
+
+    /* A transcript is appended to for as long as its session stays open. The stamp is
+     * pushed a second on because the ingest time is written in whole seconds, and a
+     * file written inside the same second as its own ingest is not a file that grew
+     * after it. */
+    appendFileSync(
+      sessionFile,
+      "\n" +
+        JSON.stringify({
+          type: "user",
+          uuid: "uuid-appended",
+          timestamp: "2026-02-02T18:00:00.000Z",
+          message: { role: "user", content: "one more thing" },
+        })
+    );
+    const later = new Date(Date.now() + 2000);
+    utimesSync(sessionFile, later, later);
+
+    const result = ingestSessions([sessionFile], db);
+    expect(result.ingested).toBe(1);
+    expect(result.skipped).toBe(0);
+
+    const after = db
+      .query("SELECT message_count FROM sessions WHERE source_path = ?")
+      .get(sessionFile) as { message_count: number };
+    expect(after.message_count).toBeGreaterThan(before.message_count);
+
+    /* Replaced rather than added beside itself. */
+    const rows = db
+      .query("SELECT COUNT(*) as n FROM sessions WHERE source_path = ?")
+      .get(sessionFile) as { n: number };
+    expect(rows.n).toBe(1);
   });
 
   test("re-ingests sessions when force=true", () => {
