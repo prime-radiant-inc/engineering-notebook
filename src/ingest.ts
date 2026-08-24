@@ -66,7 +66,9 @@ export function ingestSessions(
   let skipped = 0;
   const errors: string[] = [];
 
-  const checkStmt = db.query("SELECT id FROM sessions WHERE source_path = ?");
+  const checkStmt = db.query(
+    "SELECT id, ingested_at FROM sessions WHERE source_path = ?"
+  );
   const checkSessionId = db.query("SELECT id FROM sessions WHERE id = ?");
   const insertProject = db.prepare(`
     INSERT INTO projects (id, path, display_name, session_count)
@@ -85,11 +87,34 @@ export function ingestSessions(
   const deleteSession = db.prepare(`DELETE FROM sessions WHERE id = ?`);
 
   for (const file of files) {
+    /*
+     * A file already seen is read again when it has grown since, and its session
+     * replaced.
+     *
+     * A session's transcript is appended to for as long as the session is open, so
+     * the same path holds more every day it stays open. Skipping on the path alone
+     * froze a session at whatever length it happened to be the first night it was
+     * scanned: one session here was stored at 195 messages from a file that had
+     * reached 16,379 lines five days later, and every day of that work was missing
+     * from the journal while the run reported no errors.
+     */
+    let replacing = force;
     if (!force) {
-      const existing = checkStmt.get(file);
+      const existing = checkStmt.get(file) as
+        | { id: string; ingested_at: string }
+        | undefined;
       if (existing) {
-        skipped++;
-        continue;
+        /* datetime('now') writes UTC without a zone, so say so before parsing. It also
+         * writes whole seconds, so the file's own time is compared at that resolution:
+         * millisecond against second reads a file written in the same second as its
+         * ingest as newer than it, and re-reads every such file for ever. */
+        const seenAt = Date.parse(existing.ingested_at.replace(" ", "T") + "Z");
+        const changedAt = Math.floor(statSync(file).mtimeMs / 1000) * 1000;
+        if (changedAt <= seenAt) {
+          skipped++;
+          continue;
+        }
+        replacing = true;
       }
     }
 
@@ -102,7 +127,7 @@ export function ingestSessions(
       }
 
       // Skip if session ID already exists (e.g., same session in multiple project dirs)
-      if (!force) {
+      if (!replacing) {
         const existingById = checkSessionId.get(session.sessionId);
         if (existingById) {
           skipped++;
@@ -113,7 +138,7 @@ export function ingestSessions(
       const projectId = session.projectName;
 
       db.transaction(() => {
-        if (force) {
+        if (replacing) {
           deleteConvo.run(session.sessionId);
           deleteSession.run(session.sessionId);
         }
