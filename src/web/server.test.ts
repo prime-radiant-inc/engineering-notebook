@@ -46,9 +46,13 @@ describe("server", () => {
     closeDb();
     rmSync(tempDir, { recursive: true, force: true });
 
-    // Restore real config
+    // Restore real config. These tests exercise the settings handler, which
+    // writes to the user's actual config path, so leaving fixture data behind
+    // would become their live configuration.
     if (originalConfigContent !== null) {
       writeFileSync(configPath, originalConfigContent);
+    } else {
+      rmSync(configPath, { force: true });
     }
   });
 
